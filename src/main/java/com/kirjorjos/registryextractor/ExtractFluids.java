@@ -1,4 +1,4 @@
-package com.kirjorjos.mcregistryextractor;
+package com.kirjorjos.registryextractor;
 
 import javax.annotation.Nullable;
 

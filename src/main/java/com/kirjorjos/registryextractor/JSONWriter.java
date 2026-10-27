@@ -1,4 +1,4 @@
-package com.kirjorjos.mcregistryextractor;
+package com.kirjorjos.registryextractor;
 
 import java.io.FileWriter;
 import java.io.IOException;
@@ -27,8 +27,8 @@ public class JSONWriter {
 		try (FileWriter writer = new FileWriter(resolved.toString())) {
 				gson.toJson(json, writer);
 		} catch (IOException e) {
-			MCRegistryExtractor.getLogger().info(path);
-			MCRegistryExtractor.getLogger().warn(e.getLocalizedMessage());
+			RegistryExtractor.getLogger().info(path);
+			RegistryExtractor.getLogger().warn(e.getLocalizedMessage());
 			throw e;
 		}
 

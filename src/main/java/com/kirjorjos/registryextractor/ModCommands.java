@@ -1,12 +1,14 @@
-package com.kirjorjos.mcregistryextractor;
+package com.kirjorjos.registryextractor;
 
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
 @Mod.EventBusSubscriber(
-	modid = MCRegistryExtractor.MOD_ID,
-	bus = Mod.EventBusSubscriber.Bus.FORGE
+	modid = RegistryExtractor.MOD_ID,
+	bus = Mod.EventBusSubscriber.Bus.FORGE,
+	value = Dist.CLIENT
 )
 public class ModCommands {
 	

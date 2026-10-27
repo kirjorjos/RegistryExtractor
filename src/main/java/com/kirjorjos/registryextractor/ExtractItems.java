@@ -1,4 +1,4 @@
-package com.kirjorjos.mcregistryextractor;
+package com.kirjorjos.registryextractor;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
