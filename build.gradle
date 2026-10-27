@@ -185,6 +185,36 @@ reobf {
     devJar { }
 }
 
+jar {
+    manifest {
+        attributes([
+                "Specification-Title"     : "registry_extractor",
+                "Specification-Vendor"    : "registry_extractorsareus",
+                "Specification-Version"   : "1",
+                "Implementation-Title"    : project.name,
+                "Implementation-Version"  : project.jar.archiveVersion,
+                "Implementation-Vendor"   : "registry_extractorsareus",
+                "Implementation-Timestamp": new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
+        ])
+    }
+}
+
+task mojmapJar(type: Jar) {
+    archiveClassifier = 'mojmap'
+    from sourceSets.main.output
+    manifest {
+        attributes([
+                "Specification-Title"     : "registry_extractor",
+                "Specification-Vendor"    : "registry_extractorsareus",
+                "Specification-Version"   : "1",
+                "Implementation-Title"    : project.name,
+                "Implementation-Version"  : project.jar.archiveVersion,
+                "Implementation-Vendor"   : "registry_extractorsareus",
+                "Implementation-Timestamp": new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
+        ])
+    }
+}
+
 jar.finalizedBy('reobfJar')
 prodJar.finalizedBy('reobfProdJar')
 devJar.finalizedBy('reobfDevJar')

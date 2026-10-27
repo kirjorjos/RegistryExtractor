@@ -1,0 +1,251 @@
+// Post-run assertions over the JSON the Registry Extractor wrote to disk.
+//
+// Applied to Minecheck's root project by extractor-tests.init.gradle, which also attaches the task below as
+// a finalizer of the run task. It therefore executes after the client has exited — including when the
+// in-game expects failed, where the verdict it reprints is the first thing worth reading.
+//
+// Groovy's JsonSlurper is what keeps this Gradle-native: no dependency to resolve, no classpath to wire and
+// no tool beyond the Gradle the harness already invokes. These checks cannot live in the Lua script,
+// because Minecheck's Lua API has no filesystem access at all.
+//
+// Every check is grounded in the extractor's source. A carried-around sample document would go stale: an
+// older one predates destroySpeed/requiredTier and lowercases the entity `NBT` key.
+
+import groovy.json.JsonSlurper
+
+tasks.register('validateExtractorOutput') {
+    group = 'verification'
+    description = 'Assert the JSON the Registry Extractor wrote during the Minecheck run'
+
+    doLast {
+        def runDirProperty = project.findProperty('minecheck.extractor.runDir')
+        if (runDirProperty == null) {
+            throw new GradleException('minecheck.extractor.runDir must be set with -P')
+        }
+        def runDir = new File(runDirProperty.toString()).absoluteFile
+        def expectedVersion = (project.findProperty('minecheck.extractor.expectedVersion') ?: '1.19.2').toString()
+
+        def expectedDescription = 'Generated game registries for WIP Integrated Dynamics project'
+        def hardcodedBlockNumbers = ['plantAge', 'age']
+        def hardcodedEntityFlags = ['burning', 'wet', 'crouching', 'eating', 'child', 'inLove', 'isSheared']
+        def hardcodedEntityNumbers = ['age', 'breedingAge']
+        def registries = ['items', 'blocks', 'fluids', 'entities']
+
+        int checks = 0
+        int failures = 0
+
+        // ------------------------------------------------------------ reporting
+        def check = { boolean condition, String label, String detail = '' ->
+            checks++
+            if (condition) {
+                println "  ok    ${label}"
+            } else {
+                failures++
+                println "  FAIL  ${label}" + (detail ? " — ${detail}" : '')
+            }
+        }
+
+        def sweep = { String label, Collection violations ->
+            checks++
+            if (!violations) {
+                println "  ok    ${label}"
+                return
+            }
+            failures++
+            def shown = violations.take(3).join('; ')
+            def more = violations.size() <= 3 ? '' : " (+${violations.size() - 3} more)"
+            println "  FAIL  ${label} — ${violations.size()} violation(s): ${shown}${more}"
+        }
+
+        def finish = {
+            println ''
+            println "${checks - failures}/${checks} checks passed"
+            if (failures) {
+                throw new GradleException("${failures} of ${checks} extractor-output checks failed")
+            }
+            println 'all checks passed'
+        }
+
+        // Flatten <registry>.<namespace>.<path> -> (namespace, path, object).
+        def entries = { Map document, String registry ->
+            def out = []
+            (document[registry] ?: [:]).each { namespace, byPath ->
+                if (byPath instanceof Map) {
+                    byPath.each { path, obj -> out << [namespace, path, obj] }
+                }
+            }
+            out
+        }
+
+        println 'Minecheck extractor suite'
+        println "  run dir : ${runDir}"
+        println "  expected: Minecraft ${expectedVersion}"
+
+        // ------------------------------------------------------------ the in-game gate
+        println ''
+        println 'The in-game verdict (config/minecheck/run-result.json)'
+        def resultFile = new File(runDir, 'config/minecheck/run-result.json')
+        if (!resultFile.isFile()) {
+            check(false, 'a run-result.json was written',
+                  "missing: ${resultFile} — Minecheck treats a missing result as a failure")
+        } else {
+            def result = null
+            def parseError = null
+            try {
+                result = new JsonSlurper().parseText(resultFile.getText('UTF-8'))
+            } catch (Exception e) {
+                parseError = e.message
+            }
+            if (parseError != null) {
+                check(false, 'run-result.json parses as JSON', "parse failed: ${parseError}")
+            } else {
+                println "  script  : ${result.script}"
+                println "  finished: ${result.finished}  failed: ${result.failed}"
+                def expects = result.expects ?: []
+                expects.each { expect -> println "  ${expect.ok ? 'ok  ' : 'FAIL'} ${expect.name}" }
+                if (result.failureMessage) {
+                    println "  failureMessage: ${result.failureMessage}"
+                }
+                def badExpects = expects.findAll { !it.ok }
+                check(result.finished == true && result.failed == false && badExpects.isEmpty(),
+                      'the in-game verdict passed (finished, not failed, every expect ok)',
+                      "finished=${result.finished} failed=${result.failed} " +
+                          "expectFailures=${badExpects.collect { it.name }}")
+            }
+        }
+
+        // ------------------------------------------------------------ T5: the files exist
+        println ''
+        println 'T5 — the paths /extract was given'
+        def produced = [
+            'command API (extractor-test.json)'      : new File(runDir, 'extractor-test.json'),
+            'chat input path (extractor-typed.json)' : new File(runDir, 'extractor-typed.json'),
+            'directory path (. -> registry.json)'    : new File(runDir, 'registry.json'),
+        ]
+        produced.each { label, file -> check(file.isFile(), label, "missing: ${file}") }
+
+        def mainFile = produced['command API (extractor-test.json)']
+        if (!mainFile.isFile()) {
+            println ''
+            println 'Nothing to validate — the command produced no file at all.'
+            throw new GradleException('the extract command produced no extractor-test.json')
+        }
+
+        def document = null
+        try {
+            document = new JsonSlurper().parseText(mainFile.getText('UTF-8'))
+        } catch (Exception e) {
+            check(false, 'extractor-test.json parses as JSON', "parse failed: ${e.message}")
+            finish()
+            return
+        }
+
+        // ------------------------------------------------------------ T1: metadata
+        println ''
+        println 'T1 — metadata'
+        def metadata = document.metadata ?: [:]
+        check(metadata.schemaVersion == '1', 'schemaVersion is "1"', "got ${metadata.schemaVersion.inspect()}")
+        check(metadata.gameVersion == expectedVersion,
+              "gameVersion is ${expectedVersion} (the version Minecheck reported)",
+              "got ${metadata.gameVersion.inspect()}")
+        check(metadata.description == expectedDescription,
+              "description is the in-game command's string", "got ${metadata.description.inspect()}")
+        registries.each { registry -> check(document[registry] instanceof Map, "${registry} is an object") }
+
+        // ------------------------------------------------------------ T4: keying invariants
+        println ''
+        println 'T4 — every entry is keyed namespace -> path'
+        def badKeys = []
+        registries.each { registry ->
+            entries(document, registry).each { namespace, path, _ ->
+                [namespace, path].each { part ->
+                    if (!part || part.contains(':')) {
+                        badKeys << "${registry}.${namespace}.${path}"
+                    }
+                }
+            }
+        }
+        sweep('no empty or colon-carrying key segments', badKeys.unique().sort())
+
+        def badIds = []
+        entries(document, 'entities').each { namespace, path, entity ->
+            if (entity.id != "${namespace}:${path}") {
+                badIds << "${namespace}:${path} -> ${entity.id.inspect()}"
+            }
+        }
+        sweep('entity id matches its key (ns:path)', badIds)
+
+        [['items', 'minecraft', 'apple'], ['blocks', 'minecraft', 'stone'],
+         ['fluids', 'minecraft', 'water'], ['entities', 'minecraft', 'zombie']].each { registry, namespace, path ->
+            def byPath = (document[registry] ?: [:])[namespace]
+            check(byPath instanceof Map && byPath.containsKey(path),
+                  "${registry}.${namespace}.${path} exists")
+        }
+
+        // ------------------------------------------------------------ T3: fluids reported once
+        println ''
+        println 'T3 — each fluid once'
+        def flowing = entries(document, 'fluids')
+            .findAll { namespace, path, _ -> path.startsWith('flowing_') }
+            .collect { namespace, path, _ -> "fluids.${namespace}.${path}" }
+        sweep('no flowing_* duplicates', flowing)
+        def minecraftFluids = (document.fluids ?: [:]).minecraft ?: [:]
+        ['water', 'lava'].each { fluid ->
+            check(minecraftFluids.containsKey(fluid), "fluids.minecraft.${fluid} exists")
+        }
+
+        // ------------------------------------------------------------ T2: the documented limits
+        println ''
+        println 'T2 — the placeholder fields are still placeholders'
+        def blockViolations = []
+        def entityViolations = []
+
+        entries(document, 'blocks').each { namespace, path, block ->
+            def where = "${namespace}:${path}"
+            def energy = block.energy ?: [:]
+            if (energy.capacity != 0) {
+                blockViolations << "${where} energy.capacity=${energy.capacity.inspect()}"
+            }
+            if (energy.stored != 0) {
+                blockViolations << "${where} energy.stored=${energy.stored.inspect()}"
+            }
+            if (block.inventory != []) {
+                blockViolations << "${where} inventory is not empty"
+            }
+            hardcodedBlockNumbers.each { field ->
+                if (block[field] != 0) {
+                    blockViolations << "${where} ${field}=${block[field].inspect()}"
+                }
+            }
+        }
+
+        entries(document, 'entities').each { namespace, path, entity ->
+            def where = "${namespace}:${path}"
+            hardcodedEntityFlags.each { flag ->
+                if (entity[flag] != false) {
+                    entityViolations << "${where} ${flag}=${entity[flag].inspect()}"
+                }
+            }
+            hardcodedEntityNumbers.each { number ->
+                if (entity[number] != 0) {
+                    entityViolations << "${where} ${number}=${entity[number].inspect()}"
+                }
+            }
+            // Present and null, not absent: the consumer's Properties.wrapValue turns a null into iNull.
+            if (!entity.containsKey('NBT') || entity.NBT != null) {
+                def seen = entity.containsKey('NBT') ? entity.NBT.inspect() : '<absent>'
+                entityViolations << "${where} NBT=${seen}"
+            }
+            ['inventory', 'armorInventory', 'fluids'].each { array ->
+                if (entity[array] != []) {
+                    entityViolations << "${where} ${array} is not empty"
+                }
+            }
+        }
+
+        sweep('block energy/inventory/plantAge/age are still stubs', blockViolations)
+        sweep('entity live state is still hardcoded defaults', entityViolations)
+
+        finish()
+    }
+}

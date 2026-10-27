@@ -14,7 +14,7 @@ public class JSONWriter {
 
 	public static String write(String path, JsonObject json) throws IOException {
 		
-		Gson gson = new GsonBuilder().setPrettyPrinting().create();
+		Gson gson = new GsonBuilder().setPrettyPrinting().serializeNulls().create();
 
 		if (path.startsWith("~")) {
 			path = System.getProperty("user.home") + path.substring(1);

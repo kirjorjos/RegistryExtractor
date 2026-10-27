@@ -1,0 +1,48 @@
+gradle.projectsEvaluated {
+    def root = gradle.rootProject
+
+    def taskName = root.findProperty('minecheck.extractor.task') ?: 'testForge'
+
+    def target = root.tasks.findByName(taskName)
+    if (target == null) {
+        return
+    }
+    def scriptsDir = root.findProperty('minecheck.extractor.scriptsDir')
+    def runDir = root.findProperty('minecheck.extractor.runDir')
+    def scriptName = root.findProperty('minecheck.extractor.script') ?: 'extractor-client.lua'
+    def serverScript = root.findProperty('minecheck.extractor.serverScript')
+    def validatorScript = root.findProperty('minecheck.extractor.validatorScript')
+
+    if (scriptsDir == null || runDir == null) {
+        throw new GradleException(
+            'minecheck.extractor.scriptsDir and minecheck.extractor.runDir must both be set with -P')
+    }
+
+    target.script.set(scriptName)
+    target.scriptsDir.set(scriptsDir)
+    target.runDir.set(runDir)
+
+    target.coordinator.set(null as String)
+    if (serverScript) {
+        target.serverScript.set(serverScript)
+    } else {
+        target.serverScript.set(null as String)
+    }
+
+    // The post-run assertions are a task of their own — applied from validate-output.gradle, then attached
+    // here as a finalizer of the run task. A finalizer runs even when the task it finalizes fails, so a red
+    // in-game run still gets its verdict reprinted and its JSON checked.
+    if (validatorScript == null) {
+        throw new GradleException('minecheck.extractor.validatorScript must be set with -P')
+    }
+    def validatorFile = new File(validatorScript.toString())
+    if (!validatorFile.isFile()) {
+        throw new GradleException("validator script not found: $validatorFile")
+    }
+    root.apply from: validatorFile
+    target.finalizedBy('validateExtractorOutput')
+
+    root.logger.lifecycle(
+        "Minecheck: extractor suite wired — task=${taskName} script=${scriptName} scriptsDir=${scriptsDir} " +
+            "validator=validateExtractorOutput (finalizer of ${taskName})")
+}
