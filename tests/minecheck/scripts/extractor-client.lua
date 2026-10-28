@@ -13,7 +13,7 @@ end
 
 local version = minecheck.minecraftVersion()
 minecheck.log("minecheck reports Minecraft " .. tostring(version))
-minecheck.expect(version == "1.19.2", "running on Minecraft 1.19.2, got " .. tostring(version))
+minecheck.expect(version == "1.18.2", "running on Minecraft 1.18.2, got " .. tostring(version))
 
 local created = minecheck.createWorld({ name = WORLD })
 if not minecheck.expect(created, "created and joined the world") then

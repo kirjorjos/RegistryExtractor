@@ -7,12 +7,15 @@ Branch `1.18.2/development`, cut from `1.19.2/development` per the porting recip
 
 | Check | Result |
 |---|---|
-| `./gradlew clean build mojmapJar` | **green** — `BUILD SUCCESSFUL`, 13 tasks executed, exit 0 |
-| Jar identity | 4 jars, all `registry-extractor-0.0.1-1.18.2*`; manifest `Implementation-Version: 0.0.1-1.18.2` |
-| Mappings | 0 SRG leftovers (`f_[0-9]+_`) in the mojmap jar |
-| Mod loads on 1.18.2 | **yes** — `Registry Extractor Initializing...`, `HELLO FROM COMMON SETUP`, `HELLO FROM CLIENT SETUP`, then texture atlases built (main menu) |
+| `./gradlew clean build :forge:mojmapJar` | **green** — `BUILD SUCCESSFUL`, 19 tasks executed, exit 0 |
+| Jar identity | 5 jars: 4 Forge `registry-extractor-0.0.1-1.18.2*`, 1 Fabric `registry-extractor-fabric-0.0.1-1.18.2.jar`; Forge manifest `Implementation-Version: 0.0.1-1.18.2` |
+| Mappings | 0 SRG leftovers (`f_[0-9]+_`) in the Forge mojmap jar |
+| Forge mod loads on 1.18.2 | **yes** — `Registry Extractor Initializing...`, `HELLO FROM COMMON SETUP`, `HELLO FROM CLIENT SETUP`, then texture atlases built (main menu) |
+| Fabric mod loads on 1.18.2 | **yes** — `Loading Minecraft 1.18.2 with Fabric Loader 0.20.1`, `Loading 51 mods`, `registry_extractor 0.0.1-1.18.2`, `Registry Extractor Initializing...` |
+| Fabric metadata | **valid** — shipped `fabric.mod.json` parses, `version: 0.0.1-1.18.2`, `minecraft: 1.18.2` |
+| Quilt loads the Fabric jar | **not measured** — no harness; see `docs/loaders-1.18.2.md` |
 | `/extract` writes valid JSON | **not verified** — see Blockers |
-| Minecheck suite | **cannot run** — Minecheck is pinned to 1.19.2 |
+| Minecheck suite | **cannot run yet** — Minecheck refuses to install against 1.18.2 until its own port lands |
 
 ## Toolchain
 
@@ -27,14 +30,17 @@ Branch `1.18.2/development`, cut from `1.19.2/development` per the porting recip
 
 Gradle 7.4.2 and JDK 17 are unchanged and are what ForgeGradle 5 for 1.18.2 expects.
 
+The build is one Gradle build with `forge/` and `fabric/` subprojects; Quilt runs the Fabric jar. Loader
+matrix, pins and the Fabric substitutions are in `docs/loaders-1.18.2.md`.
+
 `gameVersion` in the exported JSON is *derived* from `mods.toml` at runtime
 (`ExtractCommand#gameVersion`), so nothing had to hardcode `1.18.2` — the metadata move alone flips it.
 
 ## Real API deltas
 
-Only three, all in the extraction classes. Everything else (`ForgeRegistries.ITEMS/BLOCKS/FLUIDS`,
+Only three Forge-side deltas, all in the extraction classes. Everything else (`ForgeRegistries.ITEMS/BLOCKS/FLUIDS`,
 `builtInRegistryHolder().tags()`, `IPlantable`, `IForgeShearable`, capability lookups, `ModList`) is
-source-compatible between 1.18.2 and 1.19.2.
+source-compatible between 1.18.2 and 1.19.2. The Fabric-side deltas are in `docs/loaders-1.18.2.md`.
 
 1. **`Component.literal(String)` → `new TextComponent(String)`** (`ExtractCommand`).
    `Component.literal` arrives in 1.19; 1.18.2 only has `TextComponent`. `sendSuccess`/`sendFailure` take
@@ -72,10 +78,13 @@ type id) and it was consulted for the fluid and entity fields here.
 
 ## Blockers / not done
 
-- **Extraction run not performed.** Minecheck drives the harness and is pinned to `1.19.2/v1.0.0`
-  (`tests/minecheck/run.sh` defaults `EXPECTED_VERSION=1.19.2`), so `tests/minecheck/` cannot validate
-  this branch. The `/extract` command path in a world — the part that actually writes `registry.json` —
-  is therefore unproven here. It needs either a Minecheck port to 1.18.2 or a manual client run.
+- **Extraction run not performed.** Minecheck drives the harness and has no 1.18.2 release yet, so
+  `tests/minecheck/` cannot validate this branch. `run.sh` already defaults to `EXPECTED_VERSION=1.18.2`
+  and reads `forge/build/libs`, so it starts working when the Minecheck 1.18.2 port is tagged. The
+  `/extract` command path in a world — the part that actually writes `registry.json` — is therefore
+  unproven on both loaders. It needs a Minecheck port to 1.18.2 or a manual client run.
+- **No Fabric/Quilt harness.** `run.sh` only installs a Forge jar, so even after the Minecheck port the
+  Fabric build is verified by launching the dev client, not by the suite.
 - **Not promoted.** `1.18.2/main` does not exist yet; per §10.1 step 6 that comes from a promotion PR
   after this branch is validated.
 - **`.notes/remaining-versions.json` untouched.** §10.1 step 7 removes the version only on promotion,
@@ -88,3 +97,7 @@ type id) and it was consulted for the fluid and entity fields here.
 The first `./gradlew build` on this branch hung for ~10 minutes inside ForgeGradle's `downloadServer`
 step with no socket open; killing it and re-running completed the setup normally (completed artifacts are
 cached, so a retry resumes rather than restarts). Expect this on any first-time version switch.
+
+A failed first Loom configure can leave a 22-byte `minecraft-project-@fabric-merged-named.jar` behind, and
+every compile then fails with `package net.minecraft.core does not exist`. Delete `.gradle/loom-cache/1.18.2`
+(and `~/.gradle/caches/fabric-loom/1.18.2/loom.mappings.*`) and re-run; the mapped jar rebuilds at ~24 MB.

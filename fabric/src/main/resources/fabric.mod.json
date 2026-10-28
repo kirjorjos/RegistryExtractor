@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "registry_extractor",
+  "version": "${version}",
+  "name": "Registry Extractor",
+  "description": "A development tool that walks a running modpack's registries and writes everything it can observe about the loaded content to a single JSON file. Run /extract <file path> from a client in a world. Spaces in the path work without quoting, a leading ~ expands to your home directory, and a directory path gets registry.json appended. Not a gameplay mod: the output feeds the Unofficial Integrated Dynamics Docs and Tools project as typed game data.",
+  "authors": [
+    "kirjorjos"
+  ],
+  "license": "GNU General Public License v3.0",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "com.kirjorjos.registryextractor.RegistryExtractor"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.14.21",
+    "fabric-api": ">=0.67.0",
+    "minecraft": "1.18.2",
+    "java": ">=17"
+  }
+}

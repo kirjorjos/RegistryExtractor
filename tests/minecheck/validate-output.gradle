@@ -23,7 +23,7 @@ tasks.register('validateExtractorOutput') {
             throw new GradleException('minecheck.extractor.runDir must be set with -P')
         }
         def runDir = new File(runDirProperty.toString()).absoluteFile
-        def expectedVersion = (project.findProperty('minecheck.extractor.expectedVersion') ?: '1.19.2').toString()
+        def expectedVersion = (project.findProperty('minecheck.extractor.expectedVersion') ?: '1.18.2').toString()
 
         def expectedDescription = 'Generated game registries for WIP Integrated Dynamics project'
         def hardcodedBlockNumbers = ['plantAge', 'age']

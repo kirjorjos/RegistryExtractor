@@ -6,7 +6,7 @@ MINECHECK_MIN_VERSION="${MINECHECK_MIN_VERSION:-1.0.0}"
 MINECHECK_REPO="${MINECHECK_REPO:-https://github.com/kirjorjos/Minecheck.git}"
 
 LOADER="${LOADER:-forge}"
-EXPECTED_VERSION="${EXPECTED_VERSION:-1.19.2}"
+EXPECTED_VERSION="${EXPECTED_VERSION:-1.18.2}"
 MINECHECK_TAG="$EXPECTED_VERSION/v$MINECHECK_MIN_VERSION"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -88,14 +88,14 @@ echo "task      : $TASK   run dir: $RUN_DIR"
 # ---------------------------------------------------------------- 1. build the extractor
 echo
 echo "== building the extractor jar"
-(cd "$ROOT" && ./gradlew build mojmapJar --console=plain -q)
+(cd "$ROOT" && ./gradlew :forge:build :forge:mojmapJar --console=plain -q)
 
 EXTRACTOR_JAR="${EXTRACTOR_JAR:-}"
 if [ -z "$EXTRACTOR_JAR" ]; then
-    EXTRACTOR_JAR="$(ls -1t "$ROOT"/build/libs/registry-extractor-*-mojmap.jar 2>/dev/null | head -1 || true)"
+    EXTRACTOR_JAR="$(ls -1t "$ROOT"/forge/build/libs/registry-extractor-*-mojmap.jar 2>/dev/null | head -1 || true)"
 fi
 if [ -z "$EXTRACTOR_JAR" ] || [ ! -f "$EXTRACTOR_JAR" ]; then
-    echo "error: no mojmap extractor jar in build/libs — run ./gradlew mojmapJar" >&2
+    echo "error: no mojmap extractor jar in forge/build/libs — run ./gradlew :forge:mojmapJar" >&2
     exit 1
 fi
 
