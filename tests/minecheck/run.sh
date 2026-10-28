@@ -86,16 +86,38 @@ fi
 echo "task      : $TASK   run dir: $RUN_DIR"
 
 # ---------------------------------------------------------------- 1. build the extractor
+module_build_file() {
+    local loader="$1"
+    if [ -f "$ROOT/$loader/build.gradle" ] || [ -f "$ROOT/$loader/build.gradle.kts" ]; then
+        printf '%s' "$loader"
+    fi
+}
+
+FOUND_MODULES="$(for candidate in forge fabric quilt; do module_build_file "$candidate"; done | tr '\n' ' ')"
+
+if [ -n "$(module_build_file "$LOADER")" ]; then
+    MODULE_DIR="$ROOT/$LOADER"
+    BUILD_TASKS=":$LOADER:build :$LOADER:mojmapJar"
+elif [ -n "$FOUND_MODULES" ]; then
+    echo "error: this checkout has no $LOADER module (found: $FOUND_MODULES)" >&2
+    exit 1
+elif [ "$LOADER" != "forge" ]; then
+    echo "error: this checkout is single-project; its only loader is forge, not $LOADER" >&2
+    exit 1
+else
+    MODULE_DIR="$ROOT"
+    BUILD_TASKS="build mojmapJar"
+fi
 echo
-echo "== building the extractor jar"
-(cd "$ROOT" && ./gradlew build mojmapJar --console=plain -q)
+echo "== building the extractor jar ($BUILD_TASKS)"
+(cd "$ROOT" && ./gradlew $BUILD_TASKS --console=plain -q)
 
 EXTRACTOR_JAR="${EXTRACTOR_JAR:-}"
 if [ -z "$EXTRACTOR_JAR" ]; then
-    EXTRACTOR_JAR="$(ls -1t "$ROOT"/build/libs/registry-extractor-*-mojmap.jar 2>/dev/null | head -1 || true)"
+    EXTRACTOR_JAR="$(ls -1t "$MODULE_DIR"/build/libs/registry-extractor-*-mojmap.jar 2>/dev/null | head -1 || true)"
 fi
 if [ -z "$EXTRACTOR_JAR" ] || [ ! -f "$EXTRACTOR_JAR" ]; then
-    echo "error: no mojmap extractor jar in build/libs — run ./gradlew mojmapJar" >&2
+    echo "error: no mojmap extractor jar in $MODULE_DIR/build/libs — run ./gradlew $BUILD_TASKS" >&2
     exit 1
 fi
 

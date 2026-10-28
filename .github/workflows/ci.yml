@@ -1,0 +1,208 @@
+name: CI
+
+on:
+  push:
+  workflow_dispatch:
+    inputs:
+      loaders:
+        description: Comma-separated loaders to test (forge, fabric, quilt). Empty means every loader in the checkout.
+        required: false
+        type: string
+        default: ''
+      checkout_ref:
+        description: Git ref to check out. Empty means the branch the run is on.
+        required: false
+        type: string
+        default: ''
+  workflow_call:
+    inputs:
+      loaders:
+        description: Comma-separated loaders to test. Empty means every loader in the checkout.
+        required: false
+        type: string
+        default: ''
+      checkout_ref:
+        description: Git ref to check out. Empty means the branch the run is on.
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Resolve the loaders
+    runs-on: ubuntu-latest
+    outputs:
+      loaders: ${{ steps.resolve.outputs.loaders }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref }}
+          allow-unsafe-pr-checkout: ${{ inputs.checkout_ref != '' }}
+
+      - name: Resolve the loader list
+        id: resolve
+        env:
+          REQUESTED: ${{ inputs.loaders }}
+        run: |
+          set -euo pipefail
+
+          available=()
+          for loader in forge fabric quilt; do
+            # A module is a directory with a build script; build outputs alone do not count.
+            if [ -f "$loader/build.gradle" ] || [ -f "$loader/build.gradle.kts" ]; then
+              available+=("$loader")
+            fi
+          done
+          if [ ${#available[@]} -eq 0 ]; then
+            # Single-project layout: the root project is the Forge mod.
+            available=(forge)
+          fi
+
+          selected=()
+          if [ -n "$REQUESTED" ]; then
+            IFS=',' read -r -a requested <<< "$REQUESTED"
+            for loader in "${requested[@]}"; do
+              loader="$(printf '%s' "$loader" | tr -d '[:space:]')"
+              [ -n "$loader" ] || continue
+              if [[ ! " ${available[*]} " == *" $loader "* ]]; then
+                echo "::error::$loader has no module in this checkout (available: ${available[*]})"
+                exit 1
+              fi
+              selected+=("$loader")
+            done
+          else
+            selected=("${available[@]}")
+          fi
+
+          json="$(printf '%s\n' "${selected[@]}" | jq -R . | jq -sc 'map(select(length > 0))')"
+          echo "loaders=$json" >> "$GITHUB_OUTPUT"
+          echo "Testing: ${selected[*]}" >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: Build
+    needs: plan
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref }}
+          allow-unsafe-pr-checkout: ${{ inputs.checkout_ref != '' }}
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Point Gradle at the runner's JDK
+        run: |
+          set -euo pipefail
+          # gradle.properties pins a JDK 17 path for the author's machine; a runner may not have it.
+          pinned="$(sed -n 's/^org.gradle.java.home=//p' gradle.properties)"
+          if [ -n "$pinned" ] && [ ! -d "$pinned" ]; then
+            sed -i "s|^org.gradle.java.home=.*|org.gradle.java.home=$JAVA_HOME|" gradle.properties
+            echo "repinned org.gradle.java.home to $JAVA_HOME"
+          fi
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle', 'gradle.properties', 'settings.gradle') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Build
+        run: |
+          # buildAll covers both layouts: the root project, or every loader module.
+          ./gradlew buildAll --no-daemon --console=plain \
+            -Dorg.gradle.jvmargs="-Xmx2g -Dfile.encoding=UTF-8"
+        timeout-minutes: 45
+
+      - name: Upload the jars
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jars
+          path: |
+            build/libs/*.jar
+            */build/libs/*.jar
+          retention-days: 7
+          if-no-files-found: ignore
+
+  minecheck:
+    name: Minecheck (${{ matrix.loader }})
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        loader: ${{ fromJSON(needs.plan.outputs.loaders) }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref }}
+          allow-unsafe-pr-checkout: ${{ inputs.checkout_ref != '' }}
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Point Gradle at the runner's JDK
+        run: |
+          set -euo pipefail
+          pinned="$(sed -n 's/^org.gradle.java.home=//p' gradle.properties)"
+          if [ -n "$pinned" ] && [ ! -d "$pinned" ]; then
+            sed -i "s|^org.gradle.java.home=.*|org.gradle.java.home=$JAVA_HOME|" gradle.properties
+            echo "repinned org.gradle.java.home to $JAVA_HOME"
+          fi
+
+      - name: Install xvfb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-minecheck-${{ matrix.loader }}-${{ hashFiles('**/*.gradle', 'gradle.properties', 'settings.gradle') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-minecheck-${{ matrix.loader }}-
+            ${{ runner.os }}-gradle-
+
+      - name: Run the Minecheck suite
+        env:
+          LOADER: ${{ matrix.loader }}
+        run: |
+          set -euo pipefail
+          # run.sh builds the extractor, deploys the mojmap jar into Minecheck's run/mods and runs
+          # the lifecycle suite headless; Minecheck is cloned at the pinned tag into .minecheck.
+          tests/minecheck/run.sh
+
+      - name: Upload the harness output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: minecheck-${{ matrix.loader }}
+          path: |
+            .minecheck/src/*/mod/run/client/extractor-*.json
+            .minecheck/src/*/mod/run/client/registry.json
+            .minecheck/src/*/mod/run/client/config/minecheck/run-result.json
+            .minecheck/src/*/mod/run/client/logs/latest.log
+            */build/libs/*-mojmap.jar
+          retention-days: 7
+          if-no-files-found: ignore

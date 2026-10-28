@@ -1,0 +1,683 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      versions:
+        description: "Comma-separated Minecraft versions to release, e.g. 1.19.2,1.20.1"
+        required: true
+        type: string
+      dry_run:
+        description: "Preflight and print the plan; push, tag and publish nothing"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare promotion PRs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+    outputs:
+      plan: ${{ steps.plan.outputs.plan }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Preflight and open promotion PRs
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          VERSIONS_RAW: ${{ inputs.versions }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+
+          REPO = os.environ["REPO"]
+          RAW = os.environ["VERSIONS_RAW"]
+          DRY = os.environ["DRY_RUN"] == "true"
+
+
+          def run(cmd, check=True):
+              return subprocess.run(cmd, text=True, capture_output=True, check=check)
+
+
+          def gh(*args, check=True):
+              return run(["gh", *args], check=check)
+
+
+          def gh_json(*args):
+              return json.loads(gh(*args).stdout)
+
+
+          def error(msg):
+              print(f"::error::{msg}")
+
+
+          def parse_versions(raw):
+              items = [x.strip() for x in raw.split(",") if x.strip()]
+              if not items:
+                  return None, "the versions input is empty"
+              out = []
+              for item in items:
+                  if not re.fullmatch(r"[0-9]+(?:\.[0-9]+){1,2}", item):
+                      return None, f"invalid Minecraft version {item!r}"
+                  if item in out:
+                      return None, f"duplicate Minecraft version {item!r}"
+                  out.append(item)
+              return out, None
+
+
+          def branch_exists(name):
+              return run(
+                  ["git", "ls-remote", "--exit-code", "--heads", "origin", f"refs/heads/{name}"],
+                  check=False,
+              ).returncode == 0
+
+
+          def tag_exists(tag):
+              return run(
+                  ["git", "ls-remote", "--exit-code", "--tags", "origin", f"refs/tags/{tag}"],
+                  check=False,
+              ).returncode == 0
+
+
+          def remote_file(ref, path):
+              result = gh(
+                  "api",
+                  f"repos/{REPO}/contents/{path}?ref={ref}",
+                  "-H",
+                  "Accept: application/vnd.github.raw",
+                  check=False,
+              )
+              return result.stdout if result.returncode == 0 else None
+
+
+          def project_version(ref):
+              for path in ("build.gradle", "build.gradle.kts"):
+                  text = remote_file(ref, path)
+                  if not text:
+                      continue
+                  match = re.search(
+                      r"^[ \t]*version[ \t]*=[ \t]*[\"']([^\"']*)[\"'][ \t]*$", text, re.M
+                  )
+                  if match:
+                      return match.group(1)
+              return None
+
+
+          def changelog_notes(ref):
+              text = remote_file(ref, "CHANGELOG.md")
+              if not text:
+                  return None
+              lines = text.splitlines()
+              index = 0
+              in_comment = False
+              while index < len(lines):
+                  line = lines[index].strip()
+                  if in_comment:
+                      in_comment = "-->" not in line
+                      index += 1
+                      continue
+                  if not line:
+                      index += 1
+                      continue
+                  if line.startswith("<!--"):
+                      in_comment = "-->" not in line
+                      index += 1
+                      continue
+                  if line.startswith("# "):
+                      index += 1
+                      continue
+                  break
+              return "\n".join(lines[index:]).strip() or None
+
+
+          def last_tag(mc):
+              result = run(
+                  [
+                      "git",
+                      "for-each-ref",
+                      "--sort=-creatordate",
+                      "--format=%(refname:short)",
+                      f"refs/tags/{mc}/*",
+                  ],
+                  check=False,
+              )
+              tags = [tag for tag in result.stdout.split() if tag]
+              return tags[0] if tags else None
+
+
+          def commits_since(mc):
+              tag = last_tag(mc)
+              revision_range = f"{tag}..origin/{mc}/development" if tag else f"origin/{mc}/development"
+              return run(["git", "log", "--oneline", "--no-merges", revision_range], check=False).stdout.strip()
+
+
+          def open_prs(mc):
+              return gh_json(
+                  "pr",
+                  "list",
+                  "--repo",
+                  REPO,
+                  "--base",
+                  f"{mc}/main",
+                  "--head",
+                  f"{mc}/development",
+                  "--state",
+                  "open",
+                  "--json",
+                  "number,url",
+              )
+
+
+          def ensure_label(name):
+              gh(
+                  "label",
+                  "create",
+                  name,
+                  "--color",
+                  "5319E7",
+                  "--description",
+                  "Release promotion PR",
+                  check=False,
+              )
+
+
+          def main():
+              versions, parse_error = parse_versions(RAW)
+              if parse_error:
+                  error(parse_error)
+                  return 1
+
+              errors = []
+              rows = []
+              for mc in versions:
+                  dev = f"{mc}/development"
+                  main = f"{mc}/main"
+                  dev_exists = branch_exists(dev)
+                  main_exists = branch_exists(main)
+                  if not dev_exists:
+                      errors.append(f"{dev}: branch does not exist")
+                  if not main_exists:
+                      errors.append(f"{main}: branch does not exist")
+
+                  version = project_version(dev) if dev_exists else None
+                  if not version:
+                      errors.append(f"{dev}: could not read the root project version")
+
+                  notes = changelog_notes(dev) if version else None
+                  if not notes:
+                      errors.append(f"{dev}: CHANGELOG.md has no pending release notes")
+
+                  rows.append(
+                      {
+                          "mc": mc,
+                          "version": version,
+                          "notes": notes,
+                          "commits": commits_since(mc) if version else "",
+                      }
+                  )
+
+              declared = {row["mc"]: row["version"] for row in rows if row["version"]}
+              if len(set(declared.values())) > 1:
+                  detail = ", ".join(f"{mc}={version}" for mc, version in declared.items())
+                  errors.append(
+                      "root project version differs across the branches being released "
+                      f"({detail}); refusing to release"
+                  )
+
+              for row in rows:
+                  if not row["version"]:
+                      continue
+                  tag = f'{row["mc"]}/v{row["version"]}'
+                  if tag_exists(tag):
+                      errors.append(f"{tag}: tag already exists")
+
+              if errors:
+                  for message in errors:
+                      error(message)
+                  return 1
+
+              if not DRY:
+                  ensure_label("release")
+
+              plan = []
+              for row in rows:
+                  existing = open_prs(row["mc"])
+                  body = (
+                      f'## Release {row["mc"]} v{row["version"]}\n\n'
+                      f'{row["notes"]}\n\n'
+                      f'### Commits\n\n```\n{row["commits"]}\n```\n'
+                  )
+                  pr_number = existing[0]["number"] if existing else None
+
+                  if DRY:
+                      print(f'would open {row["mc"]}/development -> {row["mc"]}/main (v{row["version"]})')
+                  else:
+                      with open("/tmp/pr-body.md", "w") as handle:
+                          handle.write(body)
+                      if pr_number:
+                          gh(
+                              "pr",
+                              "edit",
+                              str(pr_number),
+                              "--repo",
+                              REPO,
+                              "--body-file",
+                              "/tmp/pr-body.md",
+                          )
+                          print(f'updated promotion PR #{pr_number} for {row["mc"]}')
+                      else:
+                          created = gh(
+                              "pr",
+                              "create",
+                              "--repo",
+                              REPO,
+                              "--base",
+                              f'{row["mc"]}/main',
+                              "--head",
+                              f'{row["mc"]}/development',
+                              "--title",
+                              f'Release {row["mc"]} v{row["version"]}',
+                              "--body-file",
+                              "/tmp/pr-body.md",
+                              "--label",
+                              "release",
+                          ).stdout.strip()
+                          pr_number = int(created.rstrip("/").split("/")[-1])
+                          print(f'opened promotion PR #{pr_number} for {row["mc"]}')
+
+                  plan.append({"mc": row["mc"], "version": row["version"], "pr": pr_number})
+
+              with open("/tmp/plan.json", "w") as handle:
+                  json.dump(plan, handle)
+
+              summary = os.environ.get("GITHUB_STEP_SUMMARY")
+              if summary:
+                  with open(summary, "a") as handle:
+                      handle.write("| MC version | Project version | Promotion PR |\n|---|---|---|\n")
+                      for item in plan:
+                          pr_text = "(dry run)" if DRY else f'#{item["pr"]}'
+                          handle.write(f'| {item["mc"]} | {item["version"]} | {pr_text} |\n')
+
+              return 0
+
+
+          sys.exit(main())
+          PY
+          echo "plan=$(jq -c . /tmp/plan.json)" >> "$GITHUB_OUTPUT"
+
+  release:
+    name: Merge, tag, publish
+    needs: prepare
+    if: inputs.dry_run != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: release
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      packages: write
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_ACTOR: ${{ github.actor }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Point Gradle at the runner's JDK
+        run: |
+          set -euo pipefail
+          pinned="$(sed -n 's/^org.gradle.java.home=//p' gradle.properties)"
+          if [ -n "$pinned" ] && [ ! -d "$pinned" ]; then
+            sed -i "s|^org.gradle.java.home=.*|org.gradle.java.home=$JAVA_HOME|" gradle.properties
+            echo "repinned org.gradle.java.home to $JAVA_HOME"
+          fi
+
+      - name: Configure git
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge the promotion PRs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PLAN: ${{ needs.prepare.outputs.plan }}
+        run: |
+          set -euo pipefail
+
+          mapfile -t ROWS < <(jq -r '.[] | "\(.mc)\t\(.pr)\t\(.version)"' <<<"$PLAN")
+          for row in "${ROWS[@]}"; do
+            IFS=$'\t' read -r MC PR VERSION <<<"$row"
+            if [[ -z "$PR" || "$PR" == "null" ]]; then
+              echo "::error::no promotion PR for $MC"
+              exit 1
+            fi
+
+            gh pr merge "$PR" --repo "$REPO" --squash --delete-branch=false
+            echo "merged promotion PR #$PR: $MC v$VERSION is now on $MC/main"
+          done
+
+      - name: Publish, tag and release every merged version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PLAN: ${{ needs.prepare.outputs.plan }}
+        run: |
+          set -euo pipefail
+
+          mapfile -t ROWS < <(jq -r '.[] | "\(.mc)\t\(.pr)\t\(.version)"' <<<"$PLAN")
+
+          declared_version() {
+            local ref="$1" path value
+            for path in build.gradle build.gradle.kts; do
+              value="$(git show "$ref:$path" 2>/dev/null \
+                | sed -nE "s/^[[:space:]]*version[[:space:]]*=[[:space:]]*[\"']([^\"']*)[\"'].*$/\1/p" \
+                | head -1)"
+              if [ -n "$value" ]; then
+                printf '%s' "$value"
+                return 0
+              fi
+            done
+          }
+
+          for row in "${ROWS[@]}"; do
+            IFS=$'\t' read -r MC _ VERSION <<<"$row"
+            git fetch --force --prune --tags origin
+            DECLARED="$(declared_version "origin/$MC/main")"
+            if [[ "$DECLARED" != "$VERSION" ]]; then
+              echo "::error::$MC/main declares version ${DECLARED:-none} after the promotion merge, not $VERSION; nothing was tagged or published"
+              exit 1
+            fi
+          done
+
+          for row in "${ROWS[@]}"; do
+            IFS=$'\t' read -r MC _ VERSION <<<"$row"
+            TAG="$MC/v$VERSION"
+
+            echo "::group::Release $TAG"
+            git switch --force-create "release-$MC" "origin/$MC/main"
+
+            ./gradlew buildAll collectArtifacts --no-daemon --console=plain \
+              -Dorg.gradle.jvmargs="-Xmx2g -Dfile.encoding=UTF-8"
+
+            ./gradlew publish -Pminecraft_version="$MC" --no-daemon --console=plain \
+              -Dorg.gradle.jvmargs="-Xmx2g -Dfile.encoding=UTF-8"
+
+            git tag "$TAG"
+            git push origin "refs/tags/$TAG"
+
+            python3 <<'PY' > /tmp/release-notes.md
+          with open("CHANGELOG.md", encoding="utf-8") as handle:
+              lines = handle.read().splitlines()
+
+          index = 0
+          in_comment = False
+          while index < len(lines):
+              line = lines[index].strip()
+              if in_comment:
+                  in_comment = "-->" not in line
+                  index += 1
+                  continue
+              if not line:
+                  index += 1
+                  continue
+              if line.startswith("<!--"):
+                  in_comment = "-->" not in line
+                  index += 1
+                  continue
+              if line.startswith("# "):
+                  index += 1
+                  continue
+              break
+
+          print("\n".join(lines[index:]).strip())
+          PY
+
+            find build/artifacts -maxdepth 1 -type f -name '*.jar' -print0 \
+              | sort -z \
+              | xargs -0 sha256sum > build/artifacts/SHA256SUMS.txt
+            mapfile -t ASSETS < <(
+              find build/artifacts -maxdepth 1 -type f \
+                \( -name '*.jar' -o -name 'SHA256SUMS.txt' \) -print
+            )
+            if (( ${#ASSETS[@]} == 0 )); then
+              echo "::error::no release artifacts found in build/artifacts"
+              exit 1
+            fi
+
+            gh release create "$TAG" --repo "$REPO" --verify-tag \
+              --title "$TAG" --notes-file /tmp/release-notes.md "${ASSETS[@]}"
+
+            MC="$MC" TAG="$TAG" python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+
+          REPO = os.environ["REPO"]
+          MC = os.environ["MC"]
+          TAG = os.environ["TAG"]
+
+
+          def gh(*args):
+              return subprocess.run(
+                  ["gh", *args], text=True, capture_output=True, check=True
+              ).stdout
+
+
+          issues = json.loads(
+              gh(
+                  "api",
+                  f"repos/{REPO}/issues?state=open&labels=versions/{MC}&per_page=100",
+              )
+          )
+          for issue in issues:
+              number = issue["number"]
+              bodies = gh("api", f"repos/{REPO}/issues/{number}/comments", "--paginate", "--jq", ".[].body")
+              if f"registry-extractor-fixed-in:{MC}" not in bodies:
+                  continue
+              if f"registry-extractor-released-in:{MC}@" in bodies:
+                  continue
+              message = f"Released in **{TAG}**. <!-- registry-extractor-released-in:{MC}@{TAG} -->"
+              gh("api", f"repos/{REPO}/issues/{number}/comments", "-f", f"body={message}")
+              print(f"commented released-in on #{number}")
+          PY
+
+            echo "| $MC | $VERSION | $TAG | released |" >> "$GITHUB_STEP_SUMMARY"
+            echo "::endgroup::"
+          done
+
+      - name: Close fully released issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PLAN: ${{ needs.prepare.outputs.plan }}
+        run: |
+          set -euo pipefail
+          # Runs only after every version succeeded (the previous step aborts otherwise).
+          PLAN="$PLAN" python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+
+          REPO = os.environ["REPO"]
+          plan = json.loads(os.environ["PLAN"])
+          versions = [item["mc"] for item in plan]
+
+
+          def gh(*args):
+              return subprocess.run(
+                  ["gh", *args], text=True, capture_output=True, check=True
+              ).stdout
+
+
+          def affected_versions(body):
+              lines = (body or "").splitlines()
+              for index, line in enumerate(lines):
+                  if line.strip().lower() == "### affected minecraft versions":
+                      values = []
+                      for following in lines[index + 1 :]:
+                          if following.startswith("### "):
+                              break
+                          if following.strip():
+                              values.append(following.strip())
+                      joined = ",".join(values)
+                      return [token.strip() for token in joined.split(",") if token.strip()]
+              return []
+
+
+          seen = set()
+          for mc in versions:
+              issues = json.loads(
+                  gh(
+                      "api",
+                      f"repos/{REPO}/issues?state=open&labels=versions/{mc}&per_page=100",
+                  )
+              )
+              for issue in issues:
+                  number = issue["number"]
+                  if number in seen:
+                      continue
+                  seen.add(number)
+
+                  comments = gh(
+                      "api", f"repos/{REPO}/issues/{number}/comments", "--paginate", "--jq", ".[].body"
+                  )
+                  released = set(re.findall(r"registry-extractor-released-in:([^@\s]+)@", comments))
+                  required = set(affected_versions(issue.get("body") or ""))
+                  if not required:
+                      print(f"::notice::#{number} has no parsable affected-version field; leaving it open")
+                      continue
+                  missing = sorted(required - released)
+                  if missing:
+                      print(f"#{number} still pending: {', '.join(missing)}")
+                      continue
+
+                  message = (
+                      "Closing automatically: every affected Minecraft version has been released. "
+                      "<!-- registry-extractor-all-released -->"
+                  )
+                  gh("api", f"repos/{REPO}/issues/{number}/comments", "-f", f"body={message}")
+                  gh("api", f"repos/{REPO}/issues/{number}", "-X", "PATCH", "-f", "state=closed")
+                  print(f"closed #{number}")
+          PY
+
+      - name: Mint app token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-contents: write
+
+      - name: Clear the pending release notes
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
+          PLAN: ${{ needs.prepare.outputs.plan }}
+        run: |
+          set -euo pipefail
+          PLAN="$PLAN" python3 - <<'PY'
+          import base64
+          import json
+          import os
+          import subprocess
+          from urllib.parse import quote
+
+          REPO = os.environ["REPO"]
+          plan = json.loads(os.environ["PLAN"])
+
+
+          def gh(*args):
+              return subprocess.run(
+                  ["gh", *args], text=True, capture_output=True, check=True
+              ).stdout
+
+
+          def header_only(text):
+              out = []
+              in_comment = False
+              for line in text.splitlines():
+                  stripped = line.strip()
+                  if in_comment:
+                      out.append(line)
+                      if "-->" in stripped:
+                          in_comment = False
+                      continue
+                  if stripped.startswith("<!--"):
+                      out.append(line)
+                      in_comment = "-->" not in stripped
+                      continue
+                  if not stripped or stripped.startswith("# "):
+                      out.append(line)
+                      continue
+                  break
+              return "\n".join(out).rstrip() + "\n"
+
+
+          for item in plan:
+              mc, version = item["mc"], item["version"]
+              branch = f"{mc}/development"
+              current = json.loads(
+                  gh("api", f"repos/{REPO}/contents/CHANGELOG.md?ref={quote(branch, safe='')}")
+              )
+              text = base64.b64decode(current["content"]).decode("utf-8")
+              cleared = header_only(text)
+              if text.rstrip() == cleared.rstrip():
+                  print(f"{branch}: changelog already clear")
+                  continue
+              with open("/tmp/changelog-reset.json", "w", encoding="utf-8") as handle:
+                  json.dump(
+                      {
+                          "message": f"Clear the release notes after {branch.replace('/development', '')}/v{version}",
+                          "content": base64.b64encode(cleared.encode("utf-8")).decode(),
+                          "sha": current["sha"],
+                          "branch": branch,
+                      },
+                      handle,
+                  )
+              gh(
+                  "api",
+                  "-X",
+                  "PUT",
+                  f"repos/{REPO}/contents/CHANGELOG.md",
+                  "--input",
+                  "/tmp/changelog-reset.json",
+              )
+              print(f"{branch}: release notes cleared after v{version}")
+          PY

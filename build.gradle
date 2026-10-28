@@ -232,6 +232,48 @@ publishing {
         maven {
             url "file://${project.projectDir}/mcmodsrepo"
         }
+        
+        maven {
+            name = 'GitHubPackages'
+            url = uri('https://maven.pkg.github.com/kirjorjos/RegistryExtractor')
+            credentials {
+                username = System.getenv('GITHUB_ACTOR') ?: 'github-actions'
+                password = System.getenv('GITHUB_TOKEN')
+            }
+        }
+    }
+}
+
+def loaderModules = subprojects.findAll { it.name in ['forge', 'fabric', 'quilt'] }
+
+tasks.register('buildAll') {
+    group = 'publishing'
+    description = 'Builds the jars for every loader module.'
+    if (loaderModules.isEmpty()) {
+        dependsOn 'build', 'mojmapJar'
+    } else {
+        loaderModules.each { module ->
+            dependsOn "${module.path}:build", "${module.path}:mojmapJar"
+        }
+    }
+}
+
+tasks.register('collectArtifacts', Copy) {
+    group = 'publishing'
+    description = 'Builds every loader module and copies the shippable jars into build/artifacts.'
+    dependsOn 'buildAll'
+
+    (loaderModules.isEmpty() ? [project] : loaderModules).each { module ->
+        from(module.layout.buildDirectory.dir('libs').get().asFile) {
+           include "*-${module.version}.jar"
+        }
+    }
+
+    into layout.buildDirectory.dir('artifacts')
+
+    doLast {
+        def artifacts = layout.buildDirectory.dir('artifacts').get().asFile
+        logger.lifecycle("Collected {} jar(s) into {}", artifacts.listFiles()?.length ?: 0, artifacts)
     }
 }
 
