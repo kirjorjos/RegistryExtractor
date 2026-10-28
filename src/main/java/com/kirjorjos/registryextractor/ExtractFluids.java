@@ -3,6 +3,7 @@ package com.kirjorjos.registryextractor;
 import javax.annotation.Nullable;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 
 import net.minecraft.resources.ResourceLocation;
@@ -13,8 +14,8 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.material.FlowingFluid;
 import net.minecraft.world.level.material.Fluid;
-import net.minecraftforge.common.SoundActions;
-import net.minecraftforge.fluids.FluidType;
+import net.minecraftforge.fluids.FluidAttributes;
+import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fml.ModContainer;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.registries.ForgeRegistries;
@@ -41,11 +42,12 @@ public class ExtractFluids {
 							? fluids.getAsJsonObject(namespace)
 							: new JsonObject();
 
-			FluidType type = fluid.getFluidType();
+			FluidAttributes type = fluid.getAttributes();
 			JsonObject fluidJson = new JsonObject();
 
 			// Name
-			fluidJson.addProperty("name", type.getDescription().getString());
+			fluidJson.addProperty("name",
+					type.getDisplayName(new FluidStack(fluid, FluidAttributes.BUCKET_VOLUME)).getString());
 
 			// Mod
 			ModContainer mod = ModList.get().getModContainerById(namespace).orElse(null);
@@ -68,12 +70,10 @@ public class ExtractFluids {
 
 			// Sounds
 			JsonObject sounds = new JsonObject();
-			sounds.addProperty("bucketEmpty",
-							soundId(type.getSound(SoundActions.BUCKET_EMPTY)));
-			sounds.addProperty("bucketFill",
-							soundId(type.getSound(SoundActions.BUCKET_FILL)));
-			sounds.addProperty("vaporize",
-							soundId(type.getSound(SoundActions.FLUID_VAPORIZE)));
+			sounds.addProperty("bucketEmpty", soundId(type.getEmptySound()));
+			sounds.addProperty("bucketFill", soundId(type.getFillSound()));
+			// 1.18.2's FluidAttributes carries no vaporize sound; the key stays so the schema is identical.
+			sounds.add("vaporize", JsonNull.INSTANCE);
 			fluidJson.add("sounds", sounds);
 
 			// Bucket

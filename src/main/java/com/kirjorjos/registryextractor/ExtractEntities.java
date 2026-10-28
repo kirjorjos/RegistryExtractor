@@ -25,8 +25,8 @@ public class ExtractEntities {
 	public static JsonObject extractEntities(Entity player) {
     JsonObject entities = new JsonObject();
 
-    for (EntityType<?> type : ForgeRegistries.ENTITY_TYPES) {
-			ResourceLocation id = ForgeRegistries.ENTITY_TYPES.getKey(type);
+    for (EntityType<?> type : ForgeRegistries.ENTITIES) {
+			ResourceLocation id = ForgeRegistries.ENTITIES.getKey(type);
 			if (id == null) continue;
 
 			String namespace = id.getNamespace();

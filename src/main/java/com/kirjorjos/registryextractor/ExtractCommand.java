@@ -1,6 +1,6 @@
 package com.kirjorjos.registryextractor;
 
-import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.TextComponent;
 
 import java.io.IOException;
 
@@ -59,12 +59,12 @@ public class ExtractCommand {
 												try {
 													String path = JSONWriter.write(args, root);
 													context.getSource().sendSuccess(
-														Component.literal("Wrote to: " + path),
+														new TextComponent("Wrote to: " + path),
 														true
 													);
 												} catch(IOException e) {
 													context.getSource().sendFailure(
-														Component.literal("Failed to write to \"" + args + "\"")
+														new TextComponent("Failed to write to \"" + args + "\"")
 													);
 													return 0;
 												}
@@ -73,7 +73,7 @@ public class ExtractCommand {
 							)
 							.executes(context -> {
 									context.getSource().sendFailure(
-											Component.literal("Usage: /extract <file path>")
+											new TextComponent("Usage: /extract <file path>")
 									);
 									return 0;
 							})
