@@ -126,6 +126,7 @@ echo
 echo "== running $TASK (headless; the task wraps the client in xvfb)"
 echo "   the JSON assertions are a Gradle finalizer of $TASK: they run once the client has"
 echo "   exited, and they still run when the in-game expects fail (a finalizer ignores the outcome)"
+status=0
 (cd "$MINECHECK" && ./gradlew -I "$TESTS_DIR/extractor-tests.init.gradle" "$TASK" \
     "-Pminecheck.extractor.task=$TASK" \
     "-Pminecheck.extractor.scriptsDir=$SCRIPTS_DIR" \
@@ -133,4 +134,21 @@ echo "   exited, and they still run when the in-game expects fail (a finalizer i
     "-Pminecheck.extractor.script=extractor-client.lua" \
     "-Pminecheck.extractor.validatorScript=$TESTS_DIR/validate-output.gradle" \
     "-Pminecheck.extractor.expectedVersion=$EXPECTED_VERSION" \
-    --rerun --no-daemon --console=plain)
+    --rerun --no-daemon --console=plain) || status=$?
+
+# The shared lifecycle workflow uploads `src/<loader>/mod/run` as this leg's artifact, but the run
+# happens inside the Minecheck checkout. Copy what a failure is diagnosed from there - before the
+# status decides the exit code, so a red run still leaves its log and JSON behind.
+REPORT_DIR="${REPORT_DIR:-}"
+if [ -n "$REPORT_DIR" ]; then
+    [[ "$REPORT_DIR" = /* ]] || REPORT_DIR="$ROOT/$REPORT_DIR"
+    rm -rf "$REPORT_DIR"
+    mkdir -p "$REPORT_DIR/client/config/minecheck" "$REPORT_DIR/client/logs"
+    cp "$RUN_DIR"/extractor-*.json "$REPORT_DIR/client/" 2>/dev/null || true
+    cp "$RUN_DIR"/registry.json "$REPORT_DIR/client/" 2>/dev/null || true
+    cp "$RUN_DIR"/config/minecheck/run-result.json "$REPORT_DIR/client/config/minecheck/" 2>/dev/null || true
+    cp "$RUN_DIR"/logs/latest.log "$REPORT_DIR/client/logs/" 2>/dev/null || true
+    echo "reports   : copied to $REPORT_DIR/client"
+fi
+
+exit "$status"

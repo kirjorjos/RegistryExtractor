@@ -6,6 +6,7 @@
   "release": {
     "prefix": "RegistryExtractor-",
     "variants": ["", "-deobf"],
-    "artifactsDir": "build/artifacts"
+    "artifactsDir": "build/artifacts",
+    "docs": false
   }
 }

@@ -81,6 +81,29 @@ tasks.named<Jar>("jar") { enabled = false }
 
 tasks.named("build") { dependsOn("stageJars") }
 
+// The shared `lifecycle` check runs one task per loader, named `test<Loader>All`, and uploads
+// `src/<loader>/mod/run` as that leg's artifact. The suite itself is a Minecheck checkout - it
+// drives a real client - so this task owns the build and hands the harness the deobf jar: a nested
+// `./gradlew` against *this* project would contend for the locks of the invocation that started it.
+val deobfJar =
+  layout.projectDirectory.file(
+    "src/forge/mod/build/libs/$artifactPrefix-forge-$artifactsVersion-deobf.jar")
+
+tasks.register<Exec>("testForgeAll") {
+  group = "verification"
+  description = "Runs the Minecheck lifecycle suite against the deobf extractor jar"
+  dependsOn(":forge-mod:jar")
+
+  workingDir = projectDir
+  executable = "bash"
+  args("tests/minecheck/run.sh")
+  environment("LOADER", "forge")
+  environment("EXPECTED_VERSION", mcVersion)
+  // Skips the harness's own build step, which cannot run a second Gradle build over this project.
+  environment("EXTRACTOR_JAR", deobfJar.asFile.absolutePath)
+  environment("REPORT_DIR", "src/forge/mod/run")
+}
+
 publishing {
   publications {
     create<MavenPublication>("mavenJava") {
