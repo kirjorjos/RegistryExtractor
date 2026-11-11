@@ -35,6 +35,6 @@ body:
     id: extra
     attributes:
       label: Anything else
-      description: Logs, extracted JSON, related links.
+      description: Logs, screenshots, related links.
     validations:
       required: false
