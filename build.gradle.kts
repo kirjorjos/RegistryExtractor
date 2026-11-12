@@ -8,7 +8,7 @@ plugins {
 // Minecraft version of its own.
 val mcVersion: String = property("minecraft_version") as String
 
-version = "0.0.4"
+version = "0.0.5"
 
 group = "com.kirjorjos.registry-extractor"
 
@@ -108,8 +108,18 @@ publishing {
   publications {
     create<MavenPublication>("mavenJava") {
       artifactId = "registry-extractor"
-      artifact(tasks.named("stageJars")) {
-        builtBy(tasks.named("stageJars"))
+      // `stageJars` is a `Copy` task, and a task's artifact is its output *directory*; Gradle refuses
+      // to publish that (`Invalid publication 'mavenJava': artifact file is a directory`). Name the
+      // two jars it stages instead, with a classifier on the `-deobf` twin so both fit under the one
+      // artifact id. `builtBy` still makes the publication depend on the staging copy.
+      loaderModules.forEach { module ->
+        val loader = module.removeSuffix("-mod")
+        val staged = "$artifactPrefix-$loader-$artifactsVersion"
+        artifact(file("build/libs/$staged.jar")) { builtBy(tasks.named("stageJars")) }
+        artifact(file("build/libs/$staged-deobf.jar")) {
+          classifier = "deobf"
+          builtBy(tasks.named("stageJars"))
+        }
       }
     }
   }
