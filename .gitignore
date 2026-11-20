@@ -1,6 +1,11 @@
 .*
 !.gitignore
 
+# The workflows and issue forms are part of the repository, not local state.
+!.github
+!.github/**
+!.gitignore
+
 # eclipse
 bin
 *.launch

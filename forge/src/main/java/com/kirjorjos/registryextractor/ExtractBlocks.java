@@ -131,8 +131,7 @@ public class ExtractBlocks {
 			var holder = block.builtInRegistryHolder();
 			
 			// We iterate tags twice or just use a helper
-			for (var tag : holder.tags().toList()) {
-				String tagName = tag.location().toString();
+			for (String tagName : holder.tags().map(t -> t.location().toString()).sorted().toList()) {
 				tags.add(tagName);
 				if (tagName.equals("minecraft:needs_stone_tool")) requiredTier = Math.max(requiredTier, 1);
 				if (tagName.equals("minecraft:needs_iron_tool")) requiredTier = Math.max(requiredTier, 2);

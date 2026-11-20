@@ -2,16 +2,24 @@
 
 set -euo pipefail
 
-MINECHECK_MIN_VERSION="${MINECHECK_MIN_VERSION:-1.0.0}"
+MINECHECK_MIN_VERSION="${MINECHECK_MIN_VERSION:-3.0.2}"
 MINECHECK_REPO="${MINECHECK_REPO:-https://github.com/kirjorjos/Minecheck.git}"
-
-LOADER="${LOADER:-forge}"
-EXPECTED_VERSION="${EXPECTED_VERSION:-1.18.2}"
-MINECHECK_TAG="$EXPECTED_VERSION/v$MINECHECK_MIN_VERSION"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TESTS_DIR="$ROOT/tests/minecheck"
 SCRIPTS_DIR="$TESTS_DIR/scripts"
+
+LOADER="${LOADER:-forge}"
+
+# The version comes from gradle.properties, the same file the build derives its mods.toml range from,
+# so a version branch cannot run the suite against another branch's Minecraft.
+BRANCH_VERSION="$(sed -n 's/^minecraft_version *= *\([^[:space:]]*\).*/\1/p' "$ROOT/gradle.properties" | head -1)"
+EXPECTED_VERSION="${EXPECTED_VERSION:-$BRANCH_VERSION}"
+if [ -z "$EXPECTED_VERSION" ]; then
+    echo "error: gradle.properties declares no minecraft_version, so the suite cannot know which Minecraft it tests" >&2
+    exit 1
+fi
+MINECHECK_TAG="$EXPECTED_VERSION/v$MINECHECK_MIN_VERSION"
 
 minecheck_version() {
     sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$1/build.gradle.kts" 2>/dev/null | head -1 || true
@@ -86,23 +94,37 @@ fi
 echo "task      : $TASK   run dir: $RUN_DIR"
 
 # ---------------------------------------------------------------- 1. build the extractor
-echo
-echo "== building the extractor jar"
-(cd "$ROOT" && ./gradlew :forge:build :forge:mojmapJar --console=plain -q)
+# This branch predates the `src/<loader>/mod` layout, so its module is the top-level `forge` project
+# and the only jar Minecheck's mojmap client can load is `mojmapJar`.
+MODULE_DIR="$ROOT/$LOADER"
+if [ ! -d "$MODULE_DIR" ]; then
+    echo "error: this checkout has no $LOADER module ($MODULE_DIR)" >&2
+    exit 1
+fi
+BUILD_TASKS=":$LOADER:build :$LOADER:mojmapJar"
 
+# A caller that already built the jar (a Gradle task that owns the build) passes it in: a nested
+# `./gradlew` against the same project would contend for the locks of the invocation that started it.
 EXTRACTOR_JAR="${EXTRACTOR_JAR:-}"
 if [ -z "$EXTRACTOR_JAR" ]; then
-    EXTRACTOR_JAR="$(ls -1t "$ROOT"/forge/build/libs/registry-extractor-*-mojmap.jar 2>/dev/null | head -1 || true)"
+    echo
+    echo "== building the extractor jar ($BUILD_TASKS)"
+    (cd "$ROOT" && ./gradlew $BUILD_TASKS --console=plain -q)
+    EXTRACTOR_JAR="$(ls -1t "$MODULE_DIR"/build/libs/registry-extractor-*-mojmap.jar 2>/dev/null | head -1 || true)"
 fi
 if [ -z "$EXTRACTOR_JAR" ] || [ ! -f "$EXTRACTOR_JAR" ]; then
-    echo "error: no mojmap extractor jar in forge/build/libs — run ./gradlew :forge:mojmapJar" >&2
+    echo "error: no mojmap extractor jar in $MODULE_DIR/build/libs — run ./gradlew $BUILD_TASKS" >&2
     exit 1
 fi
 
+# `productionJar` carries Forge's `m_`/`f_` names; the development client needs the mojmap jar.
 if unzip -p "$EXTRACTOR_JAR" '*.class' 2>/dev/null | strings | grep -qE '^f_[0-9]+_$'; then
     echo "error: $EXTRACTOR_JAR is SRG-reobfuscated; this client needs the mojmap jar" >&2
     exit 1
 fi
+
+# A mod whose metadata cannot resolve a version loads as ERROR, and the suite would then blame the
+# harness for a packaging bug.
 MANIFEST_VERSION="$(unzip -p "$EXTRACTOR_JAR" META-INF/MANIFEST.MF 2>/dev/null | tr -d '\r' | awk -F': ' '/^Implementation-Version/ {print $2}')"
 if [ -z "$MANIFEST_VERSION" ]; then
     echo "error: $EXTRACTOR_JAR has no Implementation-Version; mods.toml would resolve to 0.0NONE" >&2
@@ -110,22 +132,52 @@ if [ -z "$MANIFEST_VERSION" ]; then
 fi
 
 mkdir -p "$MODS_DIR"
-rm -f "$MODS_DIR"/registry-extractor-*.jar
+rm -f "$MODS_DIR"/RegistryExtractor-*.jar "$MODS_DIR"/registry-extractor-*.jar
 cp "$EXTRACTOR_JAR" "$MODS_DIR/"
 echo "deployed  : $(basename "$EXTRACTOR_JAR") (version $MANIFEST_VERSION) -> $MODS_DIR"
 
+# Everything this run is expected to write is deleted first, so what the validator sees afterwards was
+# written by *this* run and not left over from an earlier one.
 rm -f "$RUN_DIR/extractor-test.json" "$RUN_DIR/extractor-typed.json" "$RUN_DIR/registry.json" \
-    "$RUN_DIR/config/minecheck/run-result.json"
+    "$RUN_DIR/extractor-spaced file.json" "$RUN_DIR/config/minecheck/run-result.json"
+rm -f "$HOME/.minecheck-extractor-home.json"
+
+# Minecheck copies every file of the scripts directory into the run, so the suite is staged from
+# templates: `__EXPECTED_VERSION__` is substituted here. That keeps the Lua version-agnostic without
+# teaching the harness a variable syntax it does not have.
+STAGE_DIR="$ROOT/build/minecheck-scripts"
+rm -rf "$STAGE_DIR"
+mkdir -p "$STAGE_DIR"
+for script in "$SCRIPTS_DIR"/*.lua; do
+    sed "s/__EXPECTED_VERSION__/$EXPECTED_VERSION/g" "$script" > "$STAGE_DIR/$(basename "$script")"
+done
 
 echo
 echo "== running $TASK (headless; the task wraps the client in xvfb)"
-echo "   the JSON assertions are a Gradle finalizer of $TASK: they run once the client has"
-echo "   exited, and they still run when the in-game expects fail (a finalizer ignores the outcome)"
+echo "   the JSON assertions are a finalizer of testForgeAll in this repo's build: they run once the"
+echo "   client has exited, and they still run when the in-game expects fail (a finalizer ignores the outcome)"
+status=0
 (cd "$MINECHECK" && ./gradlew -I "$TESTS_DIR/extractor-tests.init.gradle" "$TASK" \
     "-Pminecheck.extractor.task=$TASK" \
-    "-Pminecheck.extractor.scriptsDir=$SCRIPTS_DIR" \
+    "-Pminecheck.extractor.scriptsDir=$STAGE_DIR" \
     "-Pminecheck.extractor.runDir=$RUN_DIR" \
     "-Pminecheck.extractor.script=extractor-client.lua" \
-    "-Pminecheck.extractor.validatorScript=$TESTS_DIR/validate-output.gradle" \
-    "-Pminecheck.extractor.expectedVersion=$EXPECTED_VERSION" \
-    --rerun --no-daemon --console=plain)
+    --rerun --no-daemon --console=plain) || status=$?
+
+# The shared lifecycle workflow uploads `src/<loader>/mod/run` as this leg's artifact, but the run
+# happens inside the Minecheck checkout. Copy what a failure is diagnosed from there - before the
+# status decides the exit code, so a red run still leaves its log and JSON behind.
+REPORT_DIR="${REPORT_DIR:-forge/run}"
+if [ -n "$REPORT_DIR" ]; then
+    [[ "$REPORT_DIR" = /* ]] || REPORT_DIR="$ROOT/$REPORT_DIR"
+    rm -rf "$REPORT_DIR"
+    mkdir -p "$REPORT_DIR/client/config/minecheck" "$REPORT_DIR/client/logs"
+    cp "$RUN_DIR"/extractor-*.json "$REPORT_DIR/client/" 2>/dev/null || true
+    cp "$RUN_DIR/extractor-spaced file.json" "$REPORT_DIR/client/" 2>/dev/null || true
+    cp "$RUN_DIR"/registry.json "$REPORT_DIR/client/" 2>/dev/null || true
+    cp "$RUN_DIR"/config/minecheck/run-result.json "$REPORT_DIR/client/config/minecheck/" 2>/dev/null || true
+    cp "$RUN_DIR"/logs/latest.log "$REPORT_DIR/client/logs/" 2>/dev/null || true
+    echo "reports   : copied to $REPORT_DIR/client"
+fi
+
+exit "$status"

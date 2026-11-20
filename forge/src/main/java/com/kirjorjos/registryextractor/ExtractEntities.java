@@ -174,10 +174,9 @@ public class ExtractEntities {
 			
 			JsonArray tagsArray = new JsonArray();
 			type.builtInRegistryHolder().tags()
-			.forEach(tag -> {
-					String tagName = tag.location().toString();
-					tagsArray.add(tagName);
-			});
+					.map(tag -> tag.location().toString())
+					.sorted()
+					.forEach(tagsArray::add);
 			entityJson.add("tags", tagsArray);
 
 			JsonObject sounds = new JsonObject();
