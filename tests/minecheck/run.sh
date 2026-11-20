@@ -159,6 +159,14 @@ if [ -n "$MODS_EXTRA_DIR" ]; then
     echo "mod set   : $extras jars from $MODS_EXTRA_DIR"
 fi
 
+# Deobf jars expect their development-only libraries beside them rather than inside themselves, so
+# they belong on the client classpath; a library jar dropped into mods/ carries no mod metadata and
+# Forge would skip it. fetch-mods.sh writes the coordinates down with the jars it fetched.
+RUNTIME_LIBS=""
+if [ -n "$MODS_EXTRA_DIR" ] && [ -s "$MODS_EXTRA_DIR/libs.txt" ]; then
+    RUNTIME_LIBS="$(paste -sd, "$MODS_EXTRA_DIR/libs.txt")"
+fi
+
 # Everything this run is expected to write is deleted first, so what the validator sees afterwards was
 # written by *this* run and not left over from an earlier one.
 rm -f "$RUN_DIR/extractor-test.json" "$RUN_DIR/extractor-typed.json" "$RUN_DIR/registry.json" \
@@ -189,6 +197,7 @@ status=0
     "-Pminecheck.extractor.scriptsDir=$STAGE_DIR" \
     "-Pminecheck.extractor.runDir=$RUN_DIR" \
     "-Pminecheck.extractor.script=$SCRIPT" \
+    "-Pminecheck.extractor.runtimeLibs=$RUNTIME_LIBS" \
     --rerun --no-daemon --console=plain) || status=$?
 
 # A run that reports success without the file it was asked for is a failed run: the client can only
