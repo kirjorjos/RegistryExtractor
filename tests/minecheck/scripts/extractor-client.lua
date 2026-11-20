@@ -13,7 +13,10 @@ end
 
 local version = minecheck.minecraftVersion()
 minecheck.log("minecheck reports Minecraft " .. tostring(version))
-minecheck.expect(version == "1.19.2", "running on Minecraft 1.19.2, got " .. tostring(version))
+-- `__EXPECTED_VERSION__` is substituted from gradle.properties by run.sh when it stages this file,
+-- so the same script serves every version branch.
+minecheck.expect(version == "__EXPECTED_VERSION__",
+                  "running on Minecraft __EXPECTED_VERSION__, got " .. tostring(version))
 
 local created = minecheck.createWorld({ name = WORLD })
 if not minecheck.expect(created, "created and joined the world") then
@@ -34,6 +37,20 @@ minecheck.log("typed: /extract " .. OUT_TYPED .. " (via the chat input path)")
 
 minecheck.runCommand("extract .")
 minecheck.log("issued: /extract . (expects the run dir to gain registry.json)")
+
+-- The argument is a greedy string, so a path with spaces needs no quoting.
+if not minecheck.expect(minecheck.typeText("extract extractor-spaced file.json", "command"),
+                        "typed an unquoted path containing a space") then
+  minecheck.fail("typeText had nothing to type into — is the chat screen opening?")
+end
+minecheck.press("enter")
+minecheck.sleep(2)
+minecheck.log("issued: /extract extractor-spaced file.json (spaces, unquoted)")
+
+-- `~` expands to the executing JVM's user.home; the validator looks for the file there and removes it.
+minecheck.runCommand("extract ~/.minecheck-extractor-home.json")
+minecheck.sleep(2)
+minecheck.log("issued: /extract ~/.minecheck-extractor-home.json")
 
 minecheck.sleep(2)
 minecheck.leaveWorld(30)

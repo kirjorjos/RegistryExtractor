@@ -46,6 +46,7 @@ public class ExtractFluids {
 
 			// Name
 			fluidJson.addProperty("name", type.getDescription().getString());
+			fluidJson.addProperty("translationKey", type.getDescriptionId());
 
 			// Mod
 			ModContainer mod = ModList.get().getModContainerById(namespace).orElse(null);
@@ -84,11 +85,12 @@ public class ExtractFluids {
 
 			// Tags
 			JsonArray tags = new JsonArray();
+			// `tags()` is a Set whose iteration order follows holder identity, so it changes from one
+			// JVM to the next; sorting the names is what makes two extractions byte-identical.
 			fluid.builtInRegistryHolder().tags()
-				.forEach(tag -> {
-						String tagName = tag.location().toString();
-						tags.add(tagName);
-				});
+					.map(tag -> tag.location().toString())
+					.sorted()
+					.forEach(tags::add);
 			fluidJson.add("tags", tags);
 
 			namespaceObj.add(path, fluidJson);

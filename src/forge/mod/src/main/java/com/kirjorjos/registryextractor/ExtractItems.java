@@ -38,6 +38,7 @@ public class ExtractItems {
 
 					JsonObject itemJson = new JsonObject();
 					itemJson.addProperty("name", stack.getHoverName().getString());
+					itemJson.addProperty("translationKey", item.getDescriptionId());
 					
 					String modName = ModList.get().getModContainerById(namespace)
 							.map(c -> c.getModInfo().getDisplayName())
@@ -105,11 +106,12 @@ public class ExtractItems {
 					itemJson.add("tooltip", tooltipArray);
 
 					JsonArray tagsArray = new JsonArray();
+					// `tags()` is a Set whose iteration order follows holder identity, so it changes from one
+					// JVM to the next; sorting the names is what makes two extractions byte-identical.
 					item.builtInRegistryHolder().tags()
-					.forEach(tag -> {
-							String tagName = tag.location().toString();
-							tagsArray.add(tagName);
-					});
+							.map(tag -> tag.location().toString())
+							.sorted()
+							.forEach(tagsArray::add);
 					itemJson.add("tags", tagsArray);
 
 					nsObj.add(path, itemJson);

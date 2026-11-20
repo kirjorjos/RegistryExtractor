@@ -9,7 +9,9 @@ modLoader="javafml" #mandatory
 loaderVersion="[43,)" #mandatory This is typically bumped every Minecraft version by Forge. See our download page for lists of versions.
 # The license for you mod. This is mandatory metadata and allows for easier comprehension of your redistributive properties.
 # Review your options at https://choosealicense.com/. All rights reserved is the default copyright stance, and is thus the default here.
-license="GNU General Public License v3.0"
+# The identifier comes from gradle.properties (licence); its text is LICENSE.txt, so the two cannot
+# drift. processResources substitutes it at build time.
+license="${licence}"
 # A URL to refer people to when problems occur with this mod
 #issueTrackerURL="https://change.me.to.your.issue.tracker.example.invalid/" #optional
 # A list of mods - how many allowed here is determined by the individual mod loader
@@ -61,7 +63,9 @@ Not a gameplay mod: the output feeds the Unofficial Integrated Dynamics Docs and
 [[dependencies.registry_extractor]]
     modId="minecraft"
     mandatory=true
-# This version range declares a minimum of the current minecraft version up to but not including the next major version
-    versionRange="[1.19.2,1.20)"
+# This version range declares a minimum of the current minecraft version up to but not including the next major version.
+# Both bounds come from gradle.properties at build time, so a branch that moves cannot keep declaring
+# the old line.
+    versionRange="[${minecraft_version},${minecraft_next})"
     ordering="NONE"
     side="BOTH"

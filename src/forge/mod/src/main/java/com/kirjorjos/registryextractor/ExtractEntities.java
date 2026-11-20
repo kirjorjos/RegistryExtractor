@@ -40,6 +40,7 @@ public class ExtractEntities {
 
 			// Basic info
 			entityJson.addProperty("name", type.getDescription().getString());
+			entityJson.addProperty("translationKey", type.getDescriptionId());
 			entityJson.addProperty("displayName", type.getDescription().getString());
 			String modName = ModList.get().getModContainerById(namespace)
 					.map(c -> c.getModInfo().getDisplayName())
@@ -173,11 +174,12 @@ public class ExtractEntities {
 			entityJson.addProperty("id", id.toString());
 			
 			JsonArray tagsArray = new JsonArray();
+			// `tags()` is a Set whose iteration order follows holder identity, so it changes from one
+			// JVM to the next; sorting the names is what makes two extractions byte-identical.
 			type.builtInRegistryHolder().tags()
-			.forEach(tag -> {
-					String tagName = tag.location().toString();
-					tagsArray.add(tagName);
-			});
+					.map(tag -> tag.location().toString())
+					.sorted()
+					.forEach(tagsArray::add);
 			entityJson.add("tags", tagsArray);
 
 			JsonObject sounds = new JsonObject();
