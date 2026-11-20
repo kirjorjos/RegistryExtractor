@@ -6,6 +6,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 
+import net.minecraft.Util;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.world.item.Item;
@@ -48,6 +49,10 @@ public class ExtractFluids {
 			// Name
 			fluidJson.addProperty("name",
 					type.getDisplayName(new FluidStack(fluid, FluidAttributes.BUCKET_VOLUME)).getString());
+			// Not FluidAttributes#getTranslationKey: on 1.18.2 that answers with the fluid block's key
+			// ("block.minecraft.water"), while 1.19.2 and this line's Fabric module answer
+			// "fluid.minecraft.water". Building it from the registry id is the same string everywhere.
+			fluidJson.addProperty("translationKey", Util.makeDescriptionId("fluid", id));
 
 			// Mod
 			ModContainer mod = ModList.get().getModContainerById(namespace).orElse(null);

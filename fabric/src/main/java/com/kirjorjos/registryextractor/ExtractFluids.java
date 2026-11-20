@@ -4,6 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.Util;
 import net.minecraft.core.Registry;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
@@ -43,6 +44,9 @@ public class ExtractFluids {
 			// the placed block's name is the closest available substitute.
 			String name = block == Blocks.AIR ? path : block.getName().getString();
 			fluidJson.addProperty("name", name);
+			// Forge answers this from FluidAttributes; vanilla has no such object, but the registry id
+			// is what the key is made from, so the same "fluid.<ns>.<path>" comes out of both loaders.
+			fluidJson.addProperty("translationKey", Util.makeDescriptionId("fluid", id));
 
 			// Mod
 			String modName = FabricLoader.getInstance().getModContainer(namespace)

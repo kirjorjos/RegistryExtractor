@@ -38,6 +38,7 @@ public class ExtractEntities {
 
 			// Basic info
 			entityJson.addProperty("name", type.getDescription().getString());
+			entityJson.addProperty("translationKey", type.getDescriptionId());
 			entityJson.addProperty("displayName", type.getDescription().getString());
 			String modName = FabricLoader.getInstance().getModContainer(namespace)
 					.map(c -> c.getMetadata().getName())
