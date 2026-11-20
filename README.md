@@ -5,8 +5,9 @@ observe about the loaded content into a single JSON file.
 
 It is a data-extraction tool for development, not a gameplay mod. Its output feeds the [Unofficial
 Integrated Dynamics Docs and Tools](https://github.com/kirjorjos/Unofficial-Integrated-Dynamics-Docs-and-Tools),
-a TypeScript reimplementation of Integrated Dynamics' core logic that consumes it as typed game data. There
-are no published releases yet; a release flow is planned, so today it runs from source.
+a TypeScript reimplementation of Integrated Dynamics' core logic that consumes it as typed game data.
+Release jars are published per Minecraft line on the [releases
+page](https://github.com/kirjorjos/RegistryExtractor/releases).
 
 ## What it extracts
 

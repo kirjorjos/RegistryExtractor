@@ -9,10 +9,10 @@ copy should not need a local Prism instance.
 It is a tool, not a check. It only runs on `workflow_dispatch`, nothing in CI validates it, and it is
 repo-owned: `kirjorjos/ci` syncs the checks a pull request runs and has no template for this.
 
-The workflow lives on every `<version>/development` branch and not on `1.19.2/main`. A dispatch runs
-the copy on the branch you pick, and GitHub's Actions sidebar lists the default branch's workflows
-first - so select the development branch in either branch selector before "Run workflow" shows this
-one.
+The workflow lives on every `<version>/development` branch, and `1.19.2/v0.1.0` put it on
+`1.19.2/main` as well, so the Actions sidebar lists it for the default branch and "Run workflow"
+needs no branch switching to appear. A dispatch still runs the copy on the branch you pick, so the
+branch selector decides which line's extractor, harness and mods are used.
 
 ## Inputs
 
