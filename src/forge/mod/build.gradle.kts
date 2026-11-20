@@ -4,6 +4,18 @@ java { toolchain { languageVersion.set(JavaLanguageVersion.of(17)) } }
 
 val mcVersion = property("minecraft_version") as String
 
+// The compatible range the mod metadata declares, from the same single source of truth: "1.18.2"
+// accepts 1.18.x, "26.1" accepts 26.1.x. Hardcoding the range in mods.toml is how a build reports a
+// plausible-looking wrong version once the branch moves.
+val mcNext =
+  mcVersion.split('.').let { parts ->
+    if (parts.size >= 2) "${parts[0]}.${parts[1].toInt() + 1}" else mcVersion
+  }
+
+// The one licence identifier in the tree; mods.toml declares `${licence}` and processResources fills
+// it in, so the metadata cannot drift from LICENSE.txt.
+val licence = property("licence") as String
+
 // The Forge line this version branch builds against; mods.toml accepts anything from 43 upwards.
 val forgeVersion = "43.5.0"
 
@@ -30,9 +42,18 @@ sourceSets.main.get().resources.srcDir(project.file("resources"))
 tasks.processResources {
   inputs.property("version", project.version)
   inputs.property("minecraftVersion", mcVersion)
+  inputs.property("minecraftNext", mcNext)
+  inputs.property("licence", licence)
   // mods.toml declares `${version}` once and this is the only place it is filled in; the old
   // `${file.jarVersion}` required a manifest attribute to exist or the mod loaded as version 0.0NONE.
-  filesMatching("META-INF/mods.toml") { expand("version" to project.version.toString()) }
+  filesMatching("META-INF/mods.toml") {
+    expand(
+      "version" to project.version.toString(),
+      "minecraft_version" to mcVersion,
+      "minecraft_next" to mcNext,
+      "licence" to licence,
+    )
+  }
 }
 
 val jarBaseName = "RegistryExtractor-forge"
