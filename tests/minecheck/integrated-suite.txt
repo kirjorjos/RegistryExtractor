@@ -1,0 +1,9 @@
+# The Integrated suite an extraction run loads by default: Modrinth project slugs, one per line.
+#
+# A selection may name any slug listed here and nothing else, so a typo fails loudly instead of
+# quietly extracting a vanilla registry. CyclopsCore and CommonCapabilities are libraries rather
+# than suite members: fetch-mods.sh adds them whenever the selection is not vanilla.
+integrated-dynamics
+integrated-tunnels
+integrated-terminals
+integrated-crafting

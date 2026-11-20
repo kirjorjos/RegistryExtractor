@@ -1,0 +1,143 @@
+# A manual dispatch that runs the extraction rather than the suite: it loads the extractor beside
+# the Integrated mods it is asked for and writes the registry JSON the docs build consumes.
+#
+# Repo-owned on purpose. kirjorjos/ci syncs the checks every pull request runs, and its templates
+# carry nothing for a tool a maintainer starts by hand, so this file is neither shared nor
+# overwritten on a sync.
+name: Extract registry
+
+on:
+  workflow_dispatch:
+    inputs:
+      mods:
+        description: "Integrated mods to load: all (the whole suite), vanilla, or comma-separated slugs."
+        required: false
+        default: all
+      output_path:
+        description: "Path inside the target repository this run updates; it has to already exist there."
+        required: false
+        default: ""
+      mode:
+        description: "Upload the file as an artifact, or commit it to the target repository."
+        required: false
+        type: choice
+        options:
+          - artifact
+          - commit
+        default: artifact
+      target_repo:
+        description: "owner/name a commit-mode run writes to."
+        required: false
+        default: kirjorjos/Unofficial-Integrated-Dynamics-Docs-and-Tools
+      target_ref:
+        description: "Branch in the target repository the commit lands on."
+        required: false
+        default: main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: extract-registry-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  extract:
+    name: Extract
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out this branch
+        uses: actions/checkout@v4
+
+      - name: Install JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Read the Minecraft version
+        id: mc
+        run: |
+          version="$(sed -n 's/^minecraft_version *= *\([^[:space:]]*\).*/\1/p' gradle.properties | head -1)"
+          if [ -z "$version" ]; then
+            echo "::error::gradle.properties declares no minecraft_version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch the mod set
+        env:
+          SELECT: ${{ inputs.mods }}
+          MC: ${{ steps.mc.outputs.version }}
+        run: >-
+          bash tests/minecheck/fetch-mods.sh
+          --select "$SELECT" --minecraft "$MC" --dest build/extraction/mods
+
+      - name: Run the extraction
+        env:
+          MODS_EXTRA_DIR: build/extraction/mods
+          SCRIPT: extract-registry.lua
+          OUTPUT_FILE: extractor-registry.json
+          REPORT_DIR: build/extraction/run
+        run: bash tests/minecheck/run.sh
+
+      - name: Upload the extraction
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: registry-extraction-${{ steps.mc.outputs.version }}
+          path: |
+            build/extraction/run/client/extractor-*.json
+            build/extraction/run/client/logs/latest.log
+            build/extraction/mods/mods.txt
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Commit the extraction
+        if: inputs.mode == 'commit'
+        env:
+          TOKEN: ${{ secrets.EXTRACTION_TOKEN }}
+          TARGET_REPO: ${{ inputs.target_repo }}
+          TARGET_REF: ${{ inputs.target_ref }}
+          OUTPUT_PATH: ${{ inputs.output_path }}
+          MC: ${{ steps.mc.outputs.version }}
+          SOURCE: build/extraction/run/client/extractor-registry.json
+        run: |
+          set -euo pipefail
+          : "${TOKEN:?commit mode needs the EXTRACTION_TOKEN secret: contents: write on the target repository}"
+          : "${OUTPUT_PATH:?commit mode needs output_path: the file in $TARGET_REPO this run updates}"
+          case "$OUTPUT_PATH" in
+              /*|..*|*/../*)
+                  echo "::error::output_path must be a relative path inside $TARGET_REPO"
+                  exit 1
+                  ;;
+          esac
+          if [ ! -f "$SOURCE" ]; then
+              echo "::error::this run wrote no $SOURCE"
+              exit 1
+          fi
+
+          echo "::add-mask::$TOKEN"
+          work="$(mktemp -d)"
+          git clone --quiet --depth 1 --branch "$TARGET_REF" \
+              "https://x-access-token:$TOKEN@github.com/$TARGET_REPO.git" "$work/target"
+
+          # The dispatch updates a registry that is already committed; a path that does not exist is
+          # a wrong input, not a file to create, so it fails before anything is written.
+          if [ ! -f "$work/target/$OUTPUT_PATH" ]; then
+              echo "::error::$TARGET_REPO@$TARGET_REF has no $OUTPUT_PATH: this dispatch updates a committed registry, it does not create one"
+              exit 1
+          fi
+          install -m 644 "$SOURCE" "$work/target/$OUTPUT_PATH"
+
+          cd "$work/target"
+          if git diff --quiet -- "$OUTPUT_PATH"; then
+              echo "::notice::$OUTPUT_PATH already matches this run; nothing committed"
+              exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- "$OUTPUT_PATH"
+          git commit -m "chore: update $OUTPUT_PATH for Minecraft $MC"
+          git push --quiet origin "HEAD:$TARGET_REF"

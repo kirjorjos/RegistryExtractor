@@ -11,6 +11,16 @@ SCRIPTS_DIR="$TESTS_DIR/scripts"
 
 LOADER="${LOADER:-forge}"
 
+# `SCRIPT` picks which staged Lua file the run executes: the suite's client script, or the manual
+# extraction's. `OUTPUT_FILE` is the name that extraction writes, substituted when scripts are staged.
+SCRIPT="${SCRIPT:-extractor-client.lua}"
+OUTPUT_FILE="${OUTPUT_FILE:-extractor-registry.json}"
+case "$OUTPUT_FILE" in
+    */*) echo "error: OUTPUT_FILE must be a bare file name, not a path: $OUTPUT_FILE" >&2; exit 1 ;;
+esac
+# Jars to load beside the extractor: the mod set a manual extraction asked for, from fetch-mods.sh.
+MODS_EXTRA_DIR="${MODS_EXTRA_DIR:-}"
+
 # The version comes from gradle.properties, the same file the build derives its mods.toml range from,
 # so a version branch cannot run the suite against another branch's Minecraft.
 BRANCH_VERSION="$(sed -n 's/^minecraft_version *= *\([^[:space:]]*\).*/\1/p' "$ROOT/gradle.properties" | head -1)"
@@ -136,6 +146,28 @@ rm -f "$MODS_DIR"/RegistryExtractor-*.jar "$MODS_DIR"/registry-extractor-*.jar
 cp "$EXTRACTOR_JAR" "$MODS_DIR/"
 echo "deployed  : $(basename "$EXTRACTOR_JAR") (version $MANIFEST_VERSION) -> $MODS_DIR"
 
+# The harness's mods/ folder is shared between runs, so the mod set a previous manual extraction
+# deployed is removed first: a run asking for fewer mods must not silently keep the ones it dropped.
+MOD_SET_MANIFEST="$MODS_DIR/.extractor-mod-set.txt"
+if [ -f "$MOD_SET_MANIFEST" ]; then
+    while read -r deployed; do
+        [ -n "$deployed" ] && rm -f "$MODS_DIR/$deployed"
+    done < "$MOD_SET_MANIFEST"
+    rm -f "$MOD_SET_MANIFEST"
+fi
+if [ -n "$MODS_EXTRA_DIR" ]; then
+    if [ ! -d "$MODS_EXTRA_DIR" ]; then
+        echo "error: MODS_EXTRA_DIR=$MODS_EXTRA_DIR is not a directory" >&2
+        exit 1
+    fi
+    (cd "$MODS_EXTRA_DIR" && ls -1 ./*.jar 2>/dev/null | sed "s#^\./##") > "$MOD_SET_MANIFEST" || true
+    extras="$(wc -l < "$MOD_SET_MANIFEST")"
+    if [ "$extras" -gt 0 ]; then
+        cp "$MODS_EXTRA_DIR"/*.jar "$MODS_DIR/"
+    fi
+    echo "mod set   : $extras jars from $MODS_EXTRA_DIR"
+fi
+
 # Everything this run is expected to write is deleted first, so what the validator sees afterwards was
 # written by *this* run and not left over from an earlier one.
 rm -f "$RUN_DIR/extractor-test.json" "$RUN_DIR/extractor-typed.json" "$RUN_DIR/registry.json" \
@@ -149,20 +181,39 @@ STAGE_DIR="$ROOT/build/minecheck-scripts"
 rm -rf "$STAGE_DIR"
 mkdir -p "$STAGE_DIR"
 for script in "$SCRIPTS_DIR"/*.lua; do
-    sed "s/__EXPECTED_VERSION__/$EXPECTED_VERSION/g" "$script" > "$STAGE_DIR/$(basename "$script")"
+    sed -e "s/__EXPECTED_VERSION__/$EXPECTED_VERSION/g" \
+        -e "s#__OUTPUT_FILE__#$OUTPUT_FILE#g" \
+        "$script" > "$STAGE_DIR/$(basename "$script")"
 done
 
 echo
 echo "== running $TASK (headless; the task wraps the client in xvfb)"
-echo "   the JSON assertions are a finalizer of testForgeAll in this repo's build: they run once the"
-echo "   client has exited, and they still run when the in-game expects fail (a finalizer ignores the outcome)"
+if [ "$SCRIPT" = "extractor-client.lua" ]; then
+    echo "   the JSON assertions are a finalizer of testForgeAll in this repo's build: they run once the"
+    echo "   client has exited, and they still run when the in-game expects fail (a finalizer ignores the outcome)"
+fi
 status=0
 (cd "$MINECHECK" && ./gradlew -I "$TESTS_DIR/extractor-tests.init.gradle" "$TASK" \
     "-Pminecheck.extractor.task=$TASK" \
     "-Pminecheck.extractor.scriptsDir=$STAGE_DIR" \
     "-Pminecheck.extractor.runDir=$RUN_DIR" \
-    "-Pminecheck.extractor.script=extractor-client.lua" \
+    "-Pminecheck.extractor.script=$SCRIPT" \
     --rerun --no-daemon --console=plain) || status=$?
+
+# A run that reports success without the file it was asked for is a failed run: the client can only
+# say it issued the command, and the point of the dispatch is the JSON on disk. The check is about a
+# script other than the suite's, because the suite asserts its own four outputs.
+if [ "$SCRIPT" != "extractor-client.lua" ]; then
+    if [ ! -s "$RUN_DIR/$OUTPUT_FILE" ]; then
+        echo "error: the run wrote no $OUTPUT_FILE in $RUN_DIR" >&2
+        if [ "$status" -eq 0 ]; then status=1; fi
+    elif command -v jq > /dev/null \
+            && ! jq -e 'has("metadata") and has("items") and has("blocks") and has("fluids") and has("entities")' \
+                "$RUN_DIR/$OUTPUT_FILE" > /dev/null 2>&1; then
+        echo "error: $OUTPUT_FILE is not a registry extraction (a root registry is missing)" >&2
+        if [ "$status" -eq 0 ]; then status=1; fi
+    fi
+fi
 
 # The shared lifecycle workflow uploads `src/<loader>/mod/run` as this leg's artifact, but the run
 # happens inside the Minecheck checkout. Copy what a failure is diagnosed from there - before the
