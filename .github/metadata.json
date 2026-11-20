@@ -1,0 +1,6 @@
+{
+  "loaders": ["forge"],
+  "build": {
+    "jdk": 17
+  }
+}
