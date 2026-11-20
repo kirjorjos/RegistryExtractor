@@ -15,6 +15,10 @@ group = "com.kirjorjos.registry-extractor"
 java { toolchain { languageVersion.set(JavaLanguageVersion.of(17)) } }
 
 // The jar prefix the release names every asset with; `.github/metadata.json` declares the same one.
+// The extractor's own post-run assertions. Applied here rather than to Minecheck's build, so they
+// run in seconds against the files the suite copies back and need no harness checkout.
+apply(from = "gradle/validate-extractor-output.gradle")
+
 val artifactPrefix = "RegistryExtractor"
 
 val loaderModules = listOf("forge-mod")
@@ -103,6 +107,10 @@ tasks.register<Exec>("testForgeAll") {
   environment("EXTRACTOR_JAR", deobfJar.asFile.absolutePath)
   environment("REPORT_DIR", "src/forge/mod/run")
 }
+
+// A finalizer runs after the suite whether it passed or failed, which is what makes a red run still
+// print its in-game verdict and check the files it managed to write.
+tasks.named("testForgeAll") { finalizedBy("validateExtractorOutput") }
 
 publishing {
   publications {

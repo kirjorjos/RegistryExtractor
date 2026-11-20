@@ -129,10 +129,14 @@ public class ExtractBlocks {
 			JsonArray tags = new JsonArray();
 			int requiredTier = 0;
 			var holder = block.builtInRegistryHolder();
-			
-			// We iterate tags twice or just use a helper
-			for (var tag : holder.tags().toList()) {
-				String tagName = tag.location().toString();
+
+			// `tags()` is a Set whose iteration order follows holder identity, so it changes from one
+			// JVM to the next; sorting the names is what makes two extractions byte-identical. The tier
+			// walk rides along in the same pass, and `Math.max` makes it order-independent either way.
+			for (String tagName : holder.tags()
+					.map(tag -> tag.location().toString())
+					.sorted()
+					.toList()) {
 				tags.add(tagName);
 				if (tagName.equals("minecraft:needs_stone_tool")) requiredTier = Math.max(requiredTier, 1);
 				if (tagName.equals("minecraft:needs_iron_tool")) requiredTier = Math.max(requiredTier, 2);
