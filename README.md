@@ -15,17 +15,17 @@ each keyed by namespace and then path, so `minecraft:stone` ends up at `blocks.m
 
 **Items** — display name, owning mod, backing block, max stack size, max damage, enchantable flag, furnace
 burn time, FE container flag and capacity, fluid container flag and fluid, inventory size, tool tier and dig
-speed, plantable flag/type/plant, tooltip lines, tags.
+speed, plantable flag/type/plant, tooltip lines, vanilla translation key, tags.
 
 **Blocks** — name, mod, item, opaque flag, shearable flag, break/place/step sounds, plantable info, crop max
 age, blockstate properties with their possible values, fluid, destroy speed, harvest tier inferred from the
-`minecraft:needs_*_tool` tags, tags.
+`minecraft:needs_*_tool` tags, vanilla translation key, tags.
 
 **Fluids** — name, mod, block, light level, density, temperature, viscosity, lighter-than-air, rarity, bucket
-empty/fill/vaporize sounds, bucket item, tags. Flowing fluids are skipped so each fluid is reported once.
+empty/fill/vaporize sounds, bucket item, vanilla translation key, tags. Flowing fluids are skipped so each fluid is reported once.
 
 **Entities** — name, mod, category-derived `mob`/`animal`/`player` flags, registry id, width, height, max
-health, hurt and death sounds, shearable flag, tags, and the items the entity will eat (for animals).
+health, hurt and death sounds, shearable flag, vanilla translation key, tags, and the items the entity will eat (for animals).
 
 On Fabric, data that only Forge can answer (energy and item-handler capabilities, `IPlantable`,
 `IForgeShearable`, fuel burn time, fluid physical properties) is reported as its neutral value. The schema

@@ -39,6 +39,7 @@ public class ExtractItems {
 
 					JsonObject itemJson = new JsonObject();
 					itemJson.addProperty("name", stack.getHoverName().getString());
+					itemJson.addProperty("translationKey", item.getDescriptionId());
 
 					String modName = FabricLoader.getInstance().getModContainer(namespace)
 							.map(c -> c.getMetadata().getName())

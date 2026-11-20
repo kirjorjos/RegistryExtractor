@@ -266,6 +266,20 @@ if (tasks.findByName('validateExtractorOutput') == null) {
             }
             sweep('entity id matches its key (ns:path)', badIds)
 
+
+            println ''
+            println 'T4b — every entry names the key it was localized from'
+            def untranslated = []
+            registries.each { registry ->
+                entries(document, registry).each { namespace, path, obj ->
+                    def key = obj.translationKey
+                    if (!(key instanceof String) || !key.contains('.')) {
+                        untranslated << "${registry}.${namespace}.${path} -> ${key.inspect()}"
+                    }
+                }
+            }
+            sweep('every entry carries its translationKey', untranslated)
+
             [['items', 'minecraft', 'apple'], ['blocks', 'minecraft', 'stone'],
              ['fluids', 'minecraft', 'water'], ['entities', 'minecraft', 'zombie']].each { registry, namespace, path ->
                 def byPath = (document[registry] ?: [:])[namespace]

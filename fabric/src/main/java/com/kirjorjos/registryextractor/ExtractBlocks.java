@@ -37,6 +37,7 @@ public class ExtractBlocks {
 
 			// name
 			blockJson.addProperty("name", block.getName().getString());
+			blockJson.addProperty("translationKey", block.getDescriptionId());
 
 			// mod
 			String modName = FabricLoader.getInstance().getModContainer(namespace)
