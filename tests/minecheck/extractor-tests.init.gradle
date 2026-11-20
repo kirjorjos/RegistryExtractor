@@ -16,6 +16,41 @@ gradle.beforeProject { project ->
         runtimeLibs.each { project.dependencies.add('runtimeOnly', it) }
         project.logger.lifecycle(
             "Minecheck: client classpath libraries — ${runtimeLibs.join(', ')} in ${project.path}")
+
+        project.afterEvaluate {
+            def helper = project.tasks.findByName('devHelperClientLaunch')
+            if (helper == null) {
+                return
+            }
+            // Forge's mod layer reads its classpath from a file, not from the client's -cp, so a
+            // library on -cp alone stays invisible to a mod module; Minecheck appends luaj to that
+            // file for the same reason, and this runs after it.
+            helper.doLast {
+                def provider = project.tasks.findByName('runClient')?.properties
+                    ?.get('minecraft_classpath_file')
+                if (provider == null) {
+                    return
+                }
+                def path = provider.invoke()
+                def legacy = path ? new File(path.toString()) : null
+                if (legacy == null || !legacy.exists()) {
+                    return
+                }
+                def text = legacy.text
+                def missing = project.configurations.runtimeClasspath.files.findAll { file ->
+                    runtimeLibs.any { coordinate ->
+                        def parts = coordinate.tokenize(':')
+                        file.name.startsWith("${parts[1]}-")
+                    }
+                }.findAll { !text.contains(it.absolutePath) }
+                if (!missing.isEmpty()) {
+                    legacy.append((text.endsWith('\n') ? '' : '\n')
+                        + missing*.absolutePath.join('\n') + '\n')
+                    project.logger.lifecycle(
+                        "Minecheck: mod layer classpath — ${missing*.name.join(', ')}")
+                }
+            }
+        }
     }
 }
 
