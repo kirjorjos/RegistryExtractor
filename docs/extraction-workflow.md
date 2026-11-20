@@ -47,6 +47,11 @@ remapped into Forge's production namespace: loading one there fails during mod c
 loads as-is. Reading it needs a token that can see the packages — the workflow grants its own
 `GITHUB_TOKEN` `packages: read`.
 
+Because the deobf artifact *is* the development view, libraries the published jar relocates into itself
+are not inside it: the mod's build declares them on its own development classpath (`modLib`, e.g. re2j for
+Integrated Dynamics). `fetch-mods.sh` writes those coordinates to `libs.txt` beside the jars and the run
+puts them on the client classpath, since a library jar in `mods/` has no mod metadata and Forge skips it.
+
 ## What a run produces
 
 The `registry-extraction-<minecraft>` artifact holds the JSON (`extractor-registry.json`), the resolved

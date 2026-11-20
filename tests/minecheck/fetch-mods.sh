@@ -70,6 +70,19 @@ case "$SELECT" in
         ;;
 esac
 
+# Libraries a deobf artifact expects on the development classpath rather than inside itself: the
+# published jar relocates them (`shadow` in the mod's build), the deobf jar is the development view
+# and declares them through `modLib`, which is a classpath entry in the mod's own dev run. A client
+# that loads the jar as a mod needs them beside it, so `libs.txt` hands the coordinates to run.sh.
+runtime_libs() {
+    case "$1" in
+        integrated-dynamics|integrated-tunnels|integrated-terminals|integrated-crafting)
+            echo "com.google.re2j:re2j:1.1"
+            ;;
+        *) : ;;
+    esac
+}
+
 LIBRARIES=(cyclops-core common-capabilities)
 
 projects=("${wanted[@]}")
@@ -112,7 +125,7 @@ resolve() {
 
 mkdir -p "$DEST"
 rm -f "$DEST"/*.jar
-rm -f "$DEST/mods.txt"
+rm -f "$DEST/mods.txt" "$DEST/libs.txt"
 
 : > "$DEST/mods.txt"
 for slug in "${projects[@]}"; do
@@ -125,6 +138,10 @@ for slug in "${projects[@]}"; do
     echo "fetched   : $slug $version -> $name"
 done
 
+for slug in "${projects[@]}"; do
+    runtime_libs "$slug"
+done | sort -u > "$DEST/libs.txt"
+
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     {
         echo "### Mod set"
@@ -136,3 +153,6 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
 fi
 
 echo "mods      : $(wc -l < "$DEST/mods.txt") jars for Minecraft $MC in $DEST"
+if [ -s "$DEST/libs.txt" ]; then
+    echo "libraries : $(paste -sd, "$DEST/libs.txt") on the client classpath"
+fi
