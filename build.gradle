@@ -5,3 +5,34 @@ subprojects {
     group = 'com.kirjorjos.registry-extractor'
     version = '0.0.1-1.18.2'
 }
+
+// The extractor's post-run assertions, applied here so they run in this build against the files the
+// suite copies back. They need no harness checkout and finish in about a second.
+apply from: "$rootDir/gradle/validate-extractor-output.gradle"
+
+// The shared `lifecycle` check runs one task per loader, named `test<Loader>All`. The suite is a
+// Minecheck checkout that drives a real client, so this task owns the build and hands the harness the
+// mojmap jar: a nested `./gradlew` against this project would contend for the locks of the invocation
+// that started it. Minecheck's client speaks mojmap, and only `:forge:mojmapJar` produces that.
+tasks.register('testForgeAll', Exec) {
+    group = 'verification'
+    description = 'Runs the Minecheck lifecycle suite against the mojmap extractor jar'
+    dependsOn ':forge:mojmapJar'
+
+    workingDir = projectDir
+    commandLine 'bash', 'tests/minecheck/run.sh'
+    environment 'LOADER', 'forge'
+    environment 'EXPECTED_VERSION', (findProperty('minecraft_version') ?: '1.18.2')
+    environment 'REPORT_DIR', 'forge/run'
+
+    // Resolved late: the jar's name carries the module's own version, which this script does not own.
+    doFirst {
+        def archive = project(':forge').tasks.named('mojmapJar').get().archiveFile.get().asFile
+        environment 'EXTRACTOR_JAR', archive.absolutePath
+    }
+}
+
+// A finalizer runs after the suite whether it passed or failed, which is what makes a red run still
+// print its in-game verdict and check the files it managed to write. This branch has no accepted
+// golden extraction yet, so its first run is `./gradlew testForgeAll -Pextractor.updateGolden`.
+tasks.named('testForgeAll') { finalizedBy 'validateExtractorOutput' }

@@ -11,7 +11,6 @@ gradle.projectsEvaluated {
     def runDir = root.findProperty('minecheck.extractor.runDir')
     def scriptName = root.findProperty('minecheck.extractor.script') ?: 'extractor-client.lua'
     def serverScript = root.findProperty('minecheck.extractor.serverScript')
-    def validatorScript = root.findProperty('minecheck.extractor.validatorScript')
 
     if (scriptsDir == null || runDir == null) {
         throw new GradleException(
@@ -29,20 +28,9 @@ gradle.projectsEvaluated {
         target.serverScript.set(null as String)
     }
 
-    // The post-run assertions are a task of their own — applied from validate-output.gradle, then attached
-    // here as a finalizer of the run task. A finalizer runs even when the task it finalizes fails, so a red
-    // in-game run still gets its verdict reprinted and its JSON checked.
-    if (validatorScript == null) {
-        throw new GradleException('minecheck.extractor.validatorScript must be set with -P')
-    }
-    def validatorFile = new File(validatorScript.toString())
-    if (!validatorFile.isFile()) {
-        throw new GradleException("validator script not found: $validatorFile")
-    }
-    root.apply from: validatorFile
-    target.finalizedBy('validateExtractorOutput')
-
+    // Nothing else is attached here: the post-run assertions are a task in the extractor's own build,
+    // finalized by `testForgeAll` there. They read the files run.sh copies back, so they need neither
+    // this build's project nor a second Gradle invocation inside it.
     root.logger.lifecycle(
-        "Minecheck: extractor suite wired — task=${taskName} script=${scriptName} scriptsDir=${scriptsDir} " +
-            "validator=validateExtractorOutput (finalizer of ${taskName})")
+        "Minecheck: extractor suite wired — task=${taskName} script=${scriptName} scriptsDir=${scriptsDir}")
 }
