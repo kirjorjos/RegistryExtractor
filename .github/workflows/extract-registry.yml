@@ -17,6 +17,10 @@ on:
         description: "Integrated mods to load: all (the whole suite), vanilla, or comma-separated slugs."
         required: false
         default: all
+      locale:
+        description: "Locales to emit: empty keeps today's single file, all for the eleven docs locales, or comma-separated docs codes (fr_FR)."
+        required: false
+        default: ""
       output_path:
         description: "Path inside the target repository this run updates; it has to already exist there."
         required: false
@@ -109,13 +113,29 @@ jobs:
           SCRIPT: extract-registry.lua
           OUTPUT_FILE: extractor-registry.json
           REPORT_DIR: build/extraction/run
+          LOCALES: ${{ inputs.locale }}
         run: bash tests/minecheck/run.sh
+
+      - name: Name the artifact
+        id: artifact
+        env:
+          LOCALES: ${{ inputs.locale }}
+          MC: ${{ steps.mc.outputs.version }}
+        run: |
+          set -euo pipefail
+          LOCALES="$(printf '%s' "$LOCALES" | tr -d '[:space:]')"
+          if [ -z "$LOCALES" ]; then
+            name="registry-extraction-$MC"
+          else
+            name="registry-extraction-$MC-${LOCALES//,/+}"
+          fi
+          echo "name=$name" >> "$GITHUB_OUTPUT"
 
       - name: Upload the extraction
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: registry-extraction-${{ steps.mc.outputs.version }}
+          name: ${{ steps.artifact.outputs.name }}
           path: |
             build/extraction/run/client/extractor-*.json
             build/extraction/run/client/logs/latest.log
@@ -131,9 +151,21 @@ jobs:
           TARGET_REF: ${{ inputs.target_ref }}
           OUTPUT_PATH: ${{ inputs.output_path }}
           MC: ${{ steps.mc.outputs.version }}
-          SOURCE: build/extraction/run/client/extractor-registry.json
+          LOCALES: ${{ inputs.locale }}
+          DEFAULT_SOURCE: build/extraction/run/client/extractor-registry.json
         run: |
           set -euo pipefail
+          LOCALES="$(printf '%s' "$LOCALES" | tr -d '[:space:]')"
+          # One commit updates one file, so a multi-locale run has no single path to write to: name a
+          # single locale, or dispatch once per locale.
+          case "$LOCALES" in
+              "") SOURCE="$DEFAULT_SOURCE" ;;
+              all|*,*)
+                  echo "::error::commit mode updates one file: set locale to a single code, or leave it empty"
+                  exit 1
+                  ;;
+              *) SOURCE="build/extraction/run/client/extractor-registry-${LOCALES}.json" ;;
+          esac
           : "${TOKEN:?commit mode needs the EXTRACTION_TOKEN secret: contents: write on the target repository}"
           : "${OUTPUT_PATH:?commit mode needs output_path: the file in $TARGET_REPO this run updates}"
           case "$OUTPUT_PATH" in
