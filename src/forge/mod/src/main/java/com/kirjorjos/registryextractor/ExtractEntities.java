@@ -40,6 +40,7 @@ public class ExtractEntities {
 
 			// Basic info
 			entityJson.addProperty("name", type.getDescription().getString());
+			entityJson.addProperty("translationKey", type.getDescriptionId());
 			entityJson.addProperty("displayName", type.getDescription().getString());
 			String modName = ModList.get().getModContainerById(namespace)
 					.map(c -> c.getModInfo().getDisplayName())

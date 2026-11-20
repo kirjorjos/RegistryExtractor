@@ -42,6 +42,7 @@ public class ExtractBlocks {
 
 			// name
 			blockJson.addProperty("name", block.getName().getString());
+			blockJson.addProperty("translationKey", block.getDescriptionId());
 
 			// mod
 			ModContainer mod = ModList.get().getModContainerById(namespace).orElse(null);
