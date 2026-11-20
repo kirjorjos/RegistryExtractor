@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-MINECHECK_MIN_VERSION="${MINECHECK_MIN_VERSION:-1.0.0}"
+MINECHECK_MIN_VERSION="${MINECHECK_MIN_VERSION:-3.0.2}"
 MINECHECK_REPO="${MINECHECK_REPO:-https://github.com/kirjorjos/Minecheck.git}"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
