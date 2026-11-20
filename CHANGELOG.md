@@ -36,6 +36,8 @@ Suggested shape, delete what you do not use:
   once.
 - Entities: name, mod, category-derived `mob`/`animal`/`player` flags, registry id, width, height, max
   health, hurt and death sounds, shearable flag, tags, and the items an animal will eat.
+- Every item, block, fluid and entity carries its vanilla translation key, so a consumer can localise a display name instead of
+  formatting the registry key itself.
 - `metadata.schemaVersion` and `metadata.gameVersion`. The latter is derived from `mods.toml`'s Minecraft
   dependency range instead of being hardcoded, so a build cannot report a plausible-looking wrong version.
 
