@@ -47,6 +47,12 @@ The path is a greedy string, so spaces work without quoting. A leading `~` expan
 a path that resolves to a directory gets `registry.json` appended. The result is reported in chat as
 `Wrote to: <absolute path>`. It needs a player in a world, so it cannot be run from the server console.
 
+That writes the client's own language. A run that leaves `extractor-locales.txt` in the client's working
+directory instead writes one `<name>-<locale>.json` per docs locale code in it, resolving each entry's
+name from the loaded mods' packaged lang files and marking entries a mod does not translate. The dispatch
+workflow uses this for its `locale` input; [`docs/extraction-workflow.md`](docs/extraction-workflow.md)
+documents the format.
+
 ## License
 
 [GPLv3](LICENSE.txt). Author: kirjorjos.

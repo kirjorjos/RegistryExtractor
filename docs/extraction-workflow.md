@@ -20,6 +20,7 @@ branch selector decides which line's extractor, harness and mods are used.
 |---|---|---|
 | `minecraft_version` | this branch | Which line to extract for. Empty uses the dispatched branch; naming another checks out `<version>/development`, and a line with no such branch fails. |
 | `mods` | `all` | `all` (the whole suite), `vanilla` (the extractor alone), or a comma-separated subset — see below |
+| `locale` | — | Empty keeps today's single extraction. `all` resolves the eleven docs locales, or name a comma-separated list of docs codes (`cs_CZ,fr_FR`) — see [Locales](#locales-and-the-artifact-format) |
 | `mode` | `artifact` | `artifact` uploads the file; `commit` writes it into the target repository |
 | `output_path` | — | Required for `commit`: the file's path inside the target repository, which must already exist there |
 | `target_repo` | `kirjorjos/Unofficial-Integrated-Dynamics-Docs-and-Tools` | `owner/name` a commit writes to |
@@ -56,12 +57,16 @@ puts them on the client classpath, since a library jar in `mods/` has no mod met
 
 The `registry-extraction-<minecraft>` artifact holds the JSON (`extractor-registry.json`), the resolved
 `mods.txt` and the client's `latest.log`. The upload is `if: always()`, so a failed extraction still leaves
-the log it is diagnosed from.
+the log it is diagnosed from. With a `locale` input the file set is one `extractor-registry-<locale>.json`
+per locale instead, and the artifact is named `registry-extraction-<minecraft>-<locale>` (a list uses `+`
+between the codes).
 
 A `mode: commit` run replaces `output_path` in `target_repo@target_ref` and pushes one commit,
 `chore: update <output_path> for Minecraft <version>`. It refuses to create the file: the rule is that this
 updates a registry the target repository already commits, so a path that does not exist there is a wrong
 input. When the run produces exactly what is already committed, it reports that and commits nothing.
+Because one commit replaces one file, commit mode needs `locale` empty or a single code; a list or `all`
+is refused (dispatch once per locale instead).
 
 Committing needs the `EXTRACTION_TOKEN` secret — a fine-grained token with `contents: write` on the target
 repository only — because the workflow's own token can read this repository and nothing else. Artifact mode
@@ -78,14 +83,75 @@ REPORT_DIR=build/extraction/run \
 tests/minecheck/run.sh
 ```
 
-The result lands at `build/extraction/run/client/extractor-registry.json`. JDK 17 is required. `run.sh`
+The result lands at `build/extraction/run/client/extractor-registry.json`. Set `LOCALES=fr_FR` (or
+`LOCALES=all`, or a comma-separated list) to write per-locale files instead; `run.sh` puts the codes in
+`extractor-locales.txt` in the client's run dir, which is what the extractor reads. JDK 17 is required. `run.sh`
 resolves the Minecheck harness itself: `MINECHECK_DIR` when set, a `../Minecheck` checkout, or a clone of
 the branch's `<version>/v<min>` tag.
 
 `run.sh` also checks the result, so a client that exits cleanly without writing the file still fails: the
 file has to exist and, when `jq` is available, carry the `metadata`/`items`/`blocks`/`fluids`/`entities`
 roots. A `mods/` folder is shared between runs, so the previous run's mod set is removed before the new
-jars are copied in.
+jars are copied in. A locale run is checked per locale, as described under [What the run
+checks](#what-the-run-checks).
+
+## Locales and the artifact format
+
+With `locale` empty, a run is the suite's: one `extractor-registry.json` with `schemaVersion` `"1"`,
+the shape the golden pins, named after the client's own language and carrying no locale metadata. Asking
+for locales writes one file per locale instead, with `schemaVersion` `"2"`: the extraction runs once and
+each locale is resolved from the `translationKey` every entry already carries and the loaded mods'
+packaged `assets/<namespace>/lang/<code>.json` files, so adding a language costs no second client boot.
+
+### Locale codes
+
+The input and the artifact use the docs site's codes; the language file is the same code lowercased.
+The eleven are `cs_CZ`, `de_DE`, `en_US`, `fr_FR`, `ja_JP`, `ko_KR`, `nl_NL`, `pt_BR`, `ru_RU`, `sv_SE`,
+`zh_CN`.
+
+| Docs | Minecraft language file |
+|---|---|
+| `cs_CZ` | `assets/<namespace>/lang/cs_cz.json` |
+| `en_US` | `assets/<namespace>/lang/en_us.json` |
+| `fr_FR` | `assets/<namespace>/lang/fr_fr.json` |
+| `ja_JP` | `assets/<namespace>/lang/ja_jp.json` |
+| `zh_CN` | `assets/<namespace>/lang/zh_cn.json` |
+
+`metadata.locale` is the docs code and `metadata.minecraftLocale` the language file code, so a consumer
+never has to guess which convention it is reading.
+
+### A locale artifact
+
+`metadata` adds three fields to the ones the extraction already writes:
+
+| Field | Meaning |
+|---|---|
+| `locale` | The docs code this file was resolved for. |
+| `minecraftLocale` | The language file code (`fr_fr`) the names came from. |
+| `mods` | `[{id, name, version}]` for every loaded mod, sorted by id: the builds that produced the file, carried inside it. |
+
+The roots are the same four objects keyed by namespace and then path. Per entry:
+
+| Field | Meaning |
+|---|---|
+| `name` | The entry's name in this locale, or `null` when the mod ships no translation for its `translationKey`. |
+| `translated` | `false` when `name` is `null` for that reason. The site shows nothing rather than the key text or the English name. |
+| `translationKey` | The key `name` was resolved from. |
+| `modName` | The owning mod's display name, on every kind (entities also keep it as `mod`). |
+| `tooltip` | Items only, and only in the `en_US` file: a tooltip is a rendered string, not a key, so any other locale reports `null` rather than English text. |
+| others | Unchanged from the extraction (`mod`, per-kind fields, tags, …). |
+
+So a per-locale file carries everything the site reads for `registry.<kind>.<namespace>.<path>.name`,
+`.modName` and `.tooltip`, and an entry upstream does not translate is marked rather than falling back
+to English. Copying `extractor-registry-<locale>.json` into the docs as
+`src/lib/i18n/lang/<locale>/registry.json` is the whole import.
+
+### What the run checks
+
+A locale run fails when it wrote no file for a requested locale, when that file's `metadata.locale` is
+not the code that was asked for, or when it resolved zero names across all four roots — what a wrong
+language code looks like. The `en_US`-only file still has to carry the five roots, as before. The checks
+that need `jq` are skipped, with the rest of `run.sh`'s, when it is not installed.
 
 ## Limits
 
