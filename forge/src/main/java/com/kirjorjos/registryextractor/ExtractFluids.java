@@ -85,10 +85,9 @@ public class ExtractFluids {
 			// Tags
 			JsonArray tags = new JsonArray();
 			fluid.builtInRegistryHolder().tags()
-				.forEach(tag -> {
-						String tagName = tag.location().toString();
-						tags.add(tagName);
-				});
+					.map(tag -> tag.location().toString())
+					.sorted()
+					.forEach(tags::add);
 			fluidJson.add("tags", tags);
 
 			namespaceObj.add(path, fluidJson);

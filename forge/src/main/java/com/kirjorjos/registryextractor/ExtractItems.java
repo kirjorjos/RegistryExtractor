@@ -106,10 +106,9 @@ public class ExtractItems {
 
 					JsonArray tagsArray = new JsonArray();
 					item.builtInRegistryHolder().tags()
-					.forEach(tag -> {
-							String tagName = tag.location().toString();
-							tagsArray.add(tagName);
-					});
+							.map(tag -> tag.location().toString())
+							.sorted()
+							.forEach(tagsArray::add);
 					itemJson.add("tags", tagsArray);
 
 					nsObj.add(path, itemJson);
