@@ -15,7 +15,8 @@ Branch `1.18.2/development`, cut from `1.19.2/development` per the porting recip
 | Fabric metadata | **valid** — shipped `fabric.mod.json` parses, `version: 0.0.1-1.18.2`, `minecraft: 1.18.2` |
 | Quilt loads the Fabric jar | **not measured** — no harness; see `docs/loaders-1.18.2.md` |
 | `/extract` writes valid JSON | **not verified** — see Blockers |
-| Minecheck suite | **cannot run yet** — Minecheck refuses to install against 1.18.2 until its own port lands |
+| Minecheck suite | **runs in CI** — the `dispatch / Lifecycle / forge` leg boots the client and asserts the
+four extracted JSON files against the committed golden |
 
 ## Toolchain
 
@@ -78,20 +79,17 @@ type id) and it was consulted for the fluid and entity fields here.
 
 ## Blockers / not done
 
-- **Extraction run not performed.** Minecheck drives the harness and has no 1.18.2 release yet, so
-  `tests/minecheck/` cannot validate this branch. `run.sh` already defaults to `EXPECTED_VERSION=1.18.2`
-  and reads `forge/build/libs`, so it starts working when the Minecheck 1.18.2 port is tagged. The
-  `/extract` command path in a world — the part that actually writes `registry.json` — is therefore
-  unproven on both loaders. It needs a Minecheck port to 1.18.2 or a manual client run.
+- **Only the Forge path is exercised.** Minecheck's 1.18.2 line is tagged and the CI lifecycle leg runs
+  the suite against this branch, so `/extract` in a world is proven on Forge. The Fabric jar has no
+  harness — `run.sh` installs a Forge client only — so its `/extract` path stays a manual check. A run
+  against a chosen mod set is what `.github/workflows/extract-registry.yml` does; see
+  `docs/extraction-workflow.md`.
 - **No Fabric/Quilt harness.** `run.sh` only installs a Forge jar, so even after the Minecheck port the
   Fabric build is verified by launching the dev client, not by the suite.
 - **Not promoted.** `1.18.2/main` does not exist yet; per §10.1 step 6 that comes from a promotion PR
   after this branch is validated.
 - **`.notes/remaining-versions.json` untouched.** §10.1 step 7 removes the version only on promotion,
   which has not happened.
-- `gradle.properties` still hardcodes `org.gradle.java.home` (migration decision 30) — inherited,
-  unchanged, still CI-hostile.
-
 ## Operational gotcha
 
 The first `./gradlew build` on this branch hung for ~10 minutes inside ForgeGradle's `downloadServer`
