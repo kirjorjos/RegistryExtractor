@@ -8,7 +8,7 @@ plugins {
 // Minecraft version of its own.
 val mcVersion: String = property("minecraft_version") as String
 
-version = "0.1.0"
+version = "0.2.0"
 
 group = "com.kirjorjos.registry-extractor"
 

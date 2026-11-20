@@ -18,6 +18,30 @@ OUTPUT_FILE="${OUTPUT_FILE:-extractor-registry.json}"
 case "$OUTPUT_FILE" in
     */*) echo "error: OUTPUT_FILE must be a bare file name, not a path: $OUTPUT_FILE" >&2; exit 1 ;;
 esac
+
+# Locales this run resolves. Empty keeps today's single extraction; `all` is the eleven the docs
+# site carries; anything else is a comma-separated list of docs codes. The extractor is handed
+# explicit codes through the run dir, so a typo fails here rather than producing untranslated files.
+DOCS_LOCALES="cs_CZ de_DE en_US fr_FR ja_JP ko_KR nl_NL pt_BR ru_RU sv_SE zh_CN"
+LOCALES="$(printf '%s' "${LOCALES:-}" | tr ',' ' ' | tr -s '[:space:]' ' ' | sed 's/^ //; s/ $//')"
+if [ "$LOCALES" = "all" ]; then
+    LOCALES="$DOCS_LOCALES"
+fi
+for code in $LOCALES; do
+    case " $DOCS_LOCALES " in
+        *" $code "*) : ;;
+        *) echo "error: $code is not a docs locale: $DOCS_LOCALES (or all)" >&2; exit 1 ;;
+    esac
+done
+# The locale list belongs to a manual extraction: the suite asserts its own four outputs, which a
+# locale run would rename.
+if [ "$SCRIPT" = "extractor-client.lua" ] && [ -n "$LOCALES" ]; then
+    echo "error: LOCALES is for an extraction run, not the suite's client script" >&2
+    exit 1
+fi
+# The file the extractor reads from its working directory; the name is LocaleExtraction.REQUEST_FILE.
+REQUEST_FILE_NAME="extractor-locales.txt"
+
 # Jars to load beside the extractor: the mod set a manual extraction asked for, from fetch-mods.sh.
 MODS_EXTRA_DIR="${MODS_EXTRA_DIR:-}"
 
@@ -159,11 +183,28 @@ if [ -n "$MODS_EXTRA_DIR" ]; then
     echo "mod set   : $extras jars from $MODS_EXTRA_DIR"
 fi
 
+# Deobf jars expect their development-only libraries beside them rather than inside themselves, so
+# they belong on the client classpath; a library jar dropped into mods/ carries no mod metadata and
+# Forge would skip it. fetch-mods.sh writes the coordinates down with the jars it fetched.
+RUNTIME_LIBS=""
+if [ -n "$MODS_EXTRA_DIR" ] && [ -s "$MODS_EXTRA_DIR/libs.txt" ]; then
+    RUNTIME_LIBS="$(paste -sd, "$MODS_EXTRA_DIR/libs.txt")"
+fi
+
 # Everything this run is expected to write is deleted first, so what the validator sees afterwards was
 # written by *this* run and not left over from an earlier one.
 rm -f "$RUN_DIR/extractor-test.json" "$RUN_DIR/extractor-typed.json" "$RUN_DIR/registry.json" \
     "$RUN_DIR/extractor-spaced file.json" "$RUN_DIR/config/minecheck/run-result.json"
+rm -f "$RUN_DIR"/extractor-registry-*.json
 rm -f "$HOME/.minecheck-extractor-home.json"
+
+# A previous dispatch's locale list must not leak into this run: the request file is rewritten (or
+# removed) every time, so a run without locales cannot inherit the last one's.
+rm -f "$RUN_DIR/$REQUEST_FILE_NAME"
+if [ -n "$LOCALES" ]; then
+    printf '%s\n' $LOCALES > "$RUN_DIR/$REQUEST_FILE_NAME"
+    echo "locales   : $LOCALES"
+fi
 
 # Minecheck copies every file of the scripts directory into the run, so the suite is staged from
 # templates: `__EXPECTED_VERSION__` is substituted here. That keeps the Lua version-agnostic without
@@ -189,13 +230,52 @@ status=0
     "-Pminecheck.extractor.scriptsDir=$STAGE_DIR" \
     "-Pminecheck.extractor.runDir=$RUN_DIR" \
     "-Pminecheck.extractor.script=$SCRIPT" \
+    "-Pminecheck.extractor.runtimeLibs=$RUNTIME_LIBS" \
     --rerun --no-daemon --console=plain) || status=$?
+
+# The name the extractor gives one locale's file: the output name with the code before its extension.
+locale_output() {
+    case "$1" in
+        *.*) printf '%s-%s.%s\n' "${1%.*}" "$2" "${1##*.}" ;;
+        *) printf '%s-%s\n' "$1" "$2" ;;
+    esac
+}
 
 # A run that reports success without the file it was asked for is a failed run: the client can only
 # say it issued the command, and the point of the dispatch is the JSON on disk. The check is about a
 # script other than the suite's, because the suite asserts its own four outputs.
 if [ "$SCRIPT" != "extractor-client.lua" ]; then
-    if [ ! -s "$RUN_DIR/$OUTPUT_FILE" ]; then
+    if [ -n "$LOCALES" ]; then
+        # A locale run is checked per locale: no file, another locale's name in it, or nothing
+        # resolved at all (which is what a wrong language code looks like) is a failed run.
+        for code in $LOCALES; do
+            file="$RUN_DIR/$(locale_output "$OUTPUT_FILE" "$code")"
+            if [ ! -s "$file" ]; then
+                echo "error: the $code run wrote no $(basename "$file") in $RUN_DIR" >&2
+                if [ "$status" -eq 0 ]; then status=1; fi
+                continue
+            fi
+            command -v jq > /dev/null || continue
+            if ! jq -e --arg locale "$code" '
+                    has("metadata") and has("items") and has("blocks") and has("fluids") and has("entities")
+                    and (.metadata.locale == $locale)
+                    and (.metadata.minecraftLocale == ($locale | ascii_downcase))
+                    and (.metadata.schemaVersion == "2")
+                ' "$file" > /dev/null 2>&1; then
+                echo "error: $(basename "$file") is not a $code extraction (roots, metadata.locale, schemaVersion)" >&2
+                if [ "$status" -eq 0 ]; then status=1; fi
+                continue
+            fi
+            counts="$(jq -r '[.. | objects | select(has("translated"))]
+                    | "\(length) \([.[] | select(.translated == true)] | length)"' "$file")"
+            total="${counts%% *}"
+            translated="${counts##* }"
+            if [ "$total" -eq 0 ] || [ "$translated" -eq 0 ]; then
+                echo "error: $(basename "$file") resolved $translated of $total names — a wrong locale code looks like this" >&2
+                if [ "$status" -eq 0 ]; then status=1; fi
+            fi
+        done
+    elif [ ! -s "$RUN_DIR/$OUTPUT_FILE" ]; then
         echo "error: the run wrote no $OUTPUT_FILE in $RUN_DIR" >&2
         if [ "$status" -eq 0 ]; then status=1; fi
     elif command -v jq > /dev/null \
