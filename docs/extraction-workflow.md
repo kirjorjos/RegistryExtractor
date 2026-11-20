@@ -9,10 +9,16 @@ copy should not need a local Prism instance.
 It is a tool, not a check. It only runs on `workflow_dispatch`, nothing in CI validates it, and it is
 repo-owned: `kirjorjos/ci` syncs the checks a pull request runs and has no template for this.
 
+The workflow lives on every `<version>/development` branch and not on `1.19.2/main`. A dispatch runs
+the copy on the branch you pick, and GitHub's Actions sidebar lists the default branch's workflows
+first - so select the development branch in either branch selector before "Run workflow" shows this
+one.
+
 ## Inputs
 
 | Input | Default | Meaning |
 |---|---|---|
+| `minecraft_version` | this branch | Which line to extract for. Empty uses the dispatched branch; naming another checks out `<version>/development`, and a line with no such branch fails. |
 | `mods` | `all` | `all` (the whole suite), `vanilla` (the extractor alone), or a comma-separated subset — see below |
 | `mode` | `artifact` | `artifact` uploads the file; `commit` writes it into the target repository |
 | `output_path` | — | Required for `commit`: the file's path inside the target repository, which must already exist there |
