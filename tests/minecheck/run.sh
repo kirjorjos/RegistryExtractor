@@ -167,7 +167,7 @@ status=0
 # The shared lifecycle workflow uploads `src/<loader>/mod/run` as this leg's artifact, but the run
 # happens inside the Minecheck checkout. Copy what a failure is diagnosed from there - before the
 # status decides the exit code, so a red run still leaves its log and JSON behind.
-REPORT_DIR="${REPORT_DIR:-forge/run}"
+REPORT_DIR="${REPORT_DIR:-src/forge/mod/run}"
 if [ -n "$REPORT_DIR" ]; then
     [[ "$REPORT_DIR" = /* ]] || REPORT_DIR="$ROOT/$REPORT_DIR"
     rm -rf "$REPORT_DIR"

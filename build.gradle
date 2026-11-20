@@ -23,7 +23,7 @@ tasks.register('testForgeAll', Exec) {
     commandLine 'bash', 'tests/minecheck/run.sh'
     environment 'LOADER', 'forge'
     environment 'EXPECTED_VERSION', (findProperty('minecraft_version') ?: '1.18.2')
-    environment 'REPORT_DIR', 'forge/run'
+    environment 'REPORT_DIR', 'src/forge/mod/run'
 
     // Resolved late: the jar's name carries the module's own version, which this script does not own.
     doFirst {
