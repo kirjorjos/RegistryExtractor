@@ -40,6 +40,9 @@ on:
 
 permissions:
   contents: read
+  # The mod set is the CyclopsMC deobf artifacts on GitHub Packages: the plain jars are production
+  # jars and cannot be loaded by the harness's development client.
+  packages: read
 
 concurrency:
   group: extract-registry-${{ github.ref }}
@@ -95,6 +98,7 @@ jobs:
         env:
           SELECT: ${{ inputs.mods }}
           MC: ${{ steps.mc.outputs.version }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: >-
           bash tests/minecheck/fetch-mods.sh
           --select "$SELECT" --minecraft "$MC" --dest build/extraction/mods
