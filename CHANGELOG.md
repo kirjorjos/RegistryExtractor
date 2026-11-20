@@ -19,3 +19,8 @@ Suggested shape, delete what you do not use:
 ## Fixed
 -
 -->
+
+## Added
+
+- Every item, block, fluid and entity carries its vanilla translation key, so a consumer can
+  localise a display name instead of formatting the registry key itself.

@@ -38,6 +38,7 @@ public class ExtractItems {
 
 					JsonObject itemJson = new JsonObject();
 					itemJson.addProperty("name", stack.getHoverName().getString());
+					itemJson.addProperty("translationKey", item.getDescriptionId());
 					
 					String modName = ModList.get().getModContainerById(namespace)
 							.map(c -> c.getModInfo().getDisplayName())

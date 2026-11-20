@@ -46,6 +46,7 @@ public class ExtractFluids {
 
 			// Name
 			fluidJson.addProperty("name", type.getDescription().getString());
+			fluidJson.addProperty("translationKey", type.getDescriptionId());
 
 			// Mod
 			ModContainer mod = ModList.get().getModContainerById(namespace).orElse(null);
