@@ -19,9 +19,3 @@ Suggested shape, delete what you do not use:
 ## Fixed
 -
 -->
-
-## Added
-
-- Per-locale extraction: one run emits an artifact per docs locale code, resolved in-process from the
-  loaded mods' packaged lang files, with entries a mod does not translate marked instead of falling
-  back to English.
